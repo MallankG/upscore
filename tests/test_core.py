@@ -72,7 +72,7 @@ class AgentLoopTest(unittest.TestCase):
         ]
         seen = []
         orig = agent.llm
-        agent.llm = lambda msgs: (seen.append(msgs[-1]), script.pop(0))[1]
+        agent.llm = lambda msgs, model=None: (seen.append(msgs[-1]), script.pop(0))[1]
         try:
             self.assertEqual(agent.respond("test", "chase limit 2k bal 1450", "web"), "Pay $1,270 before Dec 3.")
         finally:

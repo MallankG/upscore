@@ -1,7 +1,7 @@
 # Upscore: PRD
 
 > A personal agent that watches your spending and coaches your credit score up, one on-time payment at a time.
-> Built for Fly.io Hacksgiving 2026. It runs on a Sprite and uses the AgentMail connector plus an LLM connector.
+> Built for Fly.io Hacksgiving 2026. It runs on a Sprite and uses three Sprites connectors: Meta (Muse Spark), AgentMail and Slack (Bot).
 
 ## Problem
 Most people know the rules of credit (pay on time, keep utilization low) but don't follow them, because:
@@ -13,7 +13,7 @@ Most people know the rules of credit (pay on time, keep utilization low) but don
 ## Solution
 Upscore is an agent you talk to, not an app you maintain.
 1. **Forward your mail.** Set a forwarding rule from your inbox to the agent's AgentMail address for card alerts, receipts and statements. The agent extracts transactions, payments, balances, due dates and subscriptions.
-2. **Text it like a friend** (Telegram, email reply or web chat): "paid $300 on my Amex", "got paid $2,400", "my Chase limit is $5k, due on the 15th".
+2. **Text it like a friend** (Slack, Telegram, email reply or web chat): "paid $300 on my Amex", "got paid $2,400", "my Chase limit is $5k, due on the 15th".
 3. **It builds you a pathway.** It gives concrete, dated steps toward a better score: what to pay, on which card, and before which date.
 4. **It nags you.** It sends reminders before statement close and due dates, and alerts when utilization crosses 30% or 10%.
 
@@ -27,7 +27,7 @@ No bank credentials. No screen scraping. The connector keeps the API keys out of
 | # | Feature | Notes |
 |---|---------|-------|
 | F1 | Email ingestion via AgentMail | Polls the inbox, sends each new message to the agent, which extracts structured data with tools and replies when useful |
-| F2 | Natural-language logging | Through Telegram, email or web chat. The agent calls tools such as `add_transaction`, `upsert_account` and `record_payment` |
+| F2 | Natural-language logging | Through Slack (Bot connector), Telegram, email or web chat. The agent calls tools such as `add_transaction`, `upsert_account` and `record_payment` |
 | F3 | Accounts and utilization | Per-card and overall utilization, compared against limits |
 | F4 | Subscriptions | Flagged recurring charges, with a monthly total |
 | F5 | Credit pathway | A fixed engine (no LLM) produces prioritized actions; the LLM explains them |
@@ -53,7 +53,8 @@ These are based on FICO factor weights: payment history 35%, amounts owed 30%, l
  Web chat  ─▶│ http server ─────┘                                          │
             │ scheduler (daily reminders) ─▶ Telegram / email               │
             └───────────────────────────────────────────────────────────────┘
- LLM calls ─▶ Sprites gateway ─▶ OpenRouter / Anthropic / Ollama connector
+ LLM calls ─▶ Sprites gateway ─▶ Meta connector: Muse Spark (chat/plan), Muse Ember (email extraction)
+ Slack     ─▶ Sprites gateway ─▶ Slack (Bot) connector (polls one channel/DM; no public webhook needed)
 ```
 - Python 3, standard library only. SQLite runs on the Sprite's persistent disk.
 - The LLM speaks any OpenAI-compatible `/chat/completions` endpoint with tool calling.

@@ -21,6 +21,12 @@ TG_BASE = os.environ.get("TELEGRAM_API_BASE", f"https://api.telegram.org/bot{TG_
 
 EMAIL_POLL_SECS = int(os.environ.get("EMAIL_POLL_SECS", "60"))
 
+# Slack (Bot) connector, e.g. https://api.sprites.dev/v1/gateway/slack/<connection_id>  (direct: https://slack.com/api)
+SLACK_BASE = os.environ.get("SLACK_BASE_URL", "").rstrip("/")
+SLACK_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")    # local dev only; on a Sprite the connector injects it
+SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "")    # channel or DM id the bot watches, e.g. C0123 / D0456
+SLACK_POLL_SECS = int(os.environ.get("SLACK_POLL_SECS", "5"))
+
 
 # ---------- AgentMail ----------
 
@@ -100,11 +106,44 @@ def poll_telegram_once():
         tg("sendMessage", {"chat_id": chat_id, "text": agent.respond("telegram", text, "telegram")[:4000]})
 
 
+# ---------- Slack ----------
+# Polls one channel/DM with conversations.history: no public webhook needed, works from a sleeping Sprite.
+
+def slack(method, body=None, params=None):
+    headers = {"Authorization": f"Bearer {SLACK_TOKEN}"} if SLACK_TOKEN else {}
+    url = f"{SLACK_BASE}/{method}" + ("?" + urllib.parse.urlencode(params) if params else "")
+    out = agent.http_json("POST" if body is not None else "GET", url, body, headers, timeout=30)
+    if not out.get("ok"):
+        raise RuntimeError(f"slack {method}: {out.get('error')}")
+    return out
+
+
+def send_slack(text):
+    if SLACK_BASE and SLACK_CHANNEL:
+        slack("chat.postMessage", {"channel": SLACK_CHANNEL, "text": text[:3900]})
+        return True
+    return False
+
+
+def poll_slack_once():
+    oldest = db.kv_get("slack_oldest")
+    if oldest is None:  # first run: start from now, don't replay channel history
+        db.kv_set("slack_oldest", f"{time.time():.6f}")
+        return
+    msgs = slack("conversations.history", params={"channel": SLACK_CHANNEL, "oldest": oldest, "limit": 50}).get("messages", [])
+    for m in sorted(msgs, key=lambda m: float(m["ts"])):
+        db.kv_set("slack_oldest", m["ts"])
+        if m.get("bot_id") or m.get("subtype") or not m.get("text"):
+            continue  # skip our own replies, joins, edits
+        reply = agent.respond("slack", m["text"], "slack")
+        slack("chat.postMessage", {"channel": SLACK_CHANNEL, "text": reply[:3900]})
+
+
 # ---------- Reminders ----------
 
 def notify(text):
     sent = False
-    for fn in (send_telegram, lambda t: send_email("Upscore reminder", t)):
+    for fn in (send_telegram, send_slack, lambda t: send_email("Upscore reminder", t)):
         try:
             sent = bool(fn(text)) or sent
         except Exception:
@@ -150,6 +189,8 @@ def enabled():
         out.append((poll_email_once, EMAIL_POLL_SECS, "email"))
     if TG_TOKEN:
         out.append((poll_telegram_once, 0, "telegram"))  # long-poll blocks itself
+    if SLACK_BASE and SLACK_CHANNEL:
+        out.append((poll_slack_once, SLACK_POLL_SECS, "slack"))
     out.append((run_reminders_once, 3600, "reminders"))
     if os.path.exists(SPRITE_SOCK) and os.environ.get("KEEP_AWAKE", "1") == "1":
         out.append((keepalive_once, 60, "keepalive"))

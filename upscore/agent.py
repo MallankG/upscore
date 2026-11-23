@@ -1,8 +1,9 @@
 """LLM agent: OpenAI-compatible /chat/completions with tool calling.
 
-Inside a Sprite, LLM_BASE_URL points at the connector gateway, e.g.
-  https://api.sprites.dev/v1/gateway/openrouter/<connection_id>/api/v1
-and no key is needed. Outside a Sprite (local dev), set LLM_API_KEY.
+Default: Meta Model API via the Sprites Meta connector. Muse Spark plans and chats; Muse Ember (cheaper,
+built for high-volume tool calls) handles email extraction. Inside a Sprite LLM_BASE_URL is the gateway, e.g.
+  https://api.sprites.dev/v1/gateway/meta/<connection_id>/v1
+and no key is needed. Outside a Sprite (local dev), set LLM_API_KEY. Any OpenAI-compatible endpoint works.
 """
 import json
 import os
@@ -12,9 +13,12 @@ from datetime import date
 
 from . import credit, db
 
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
-LLM_MODEL = os.environ.get("LLM_MODEL", "anthropic/claude-sonnet-5.5")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.meta.ai/v1").rstrip("/")
+LLM_MODEL = os.environ.get("LLM_MODEL", "muse-spark-1.3")
+LLM_FAST_MODEL = os.environ.get("LLM_FAST_MODEL", "muse-ember-1.0")   # used for email ingestion
+LLM_REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", "low")  # Muse defaults to high/max: slow for chat
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
+FAST_SOURCES = {"email"}
 HISTORY_TURNS = 12
 # ponytail: one agent turn at a time, plenty for a single user; per-chat locks if it ever matters
 TURN_LOCK = threading.Lock()
@@ -105,10 +109,12 @@ def call_tool(name, args, source):
     return {"error": f"unknown tool {name}"}
 
 
-def llm(messages):
+def llm(messages, model=None):
     headers = {"Authorization": f"Bearer {LLM_API_KEY}"} if LLM_API_KEY else {}
-    body = {"model": LLM_MODEL, "messages": messages, "max_tokens": 1500,
+    body = {"model": model or LLM_MODEL, "messages": messages, "max_tokens": 1500,
             "tools": [{"type": "function", "function": t} for t in TOOLS]}
+    if LLM_REASONING_EFFORT:
+        body["reasoning_effort"] = LLM_REASONING_EFFORT
     return http_json("POST", LLM_BASE_URL + "/chat/completions", body, headers)["choices"][0]["message"]
 
 
@@ -120,7 +126,7 @@ def respond(chat, text, source):
                     {"role": "user", "content": text}]
         reply = "Sorry, I got stuck. Try again?"
         for _ in range(8):
-            msg = llm(messages)
+            msg = llm(messages, LLM_FAST_MODEL if source in FAST_SOURCES else LLM_MODEL)
             messages.append({k: v for k, v in msg.items() if k in ("role", "content", "tool_calls")})
             calls = msg.get("tool_calls") or []
             if not calls:

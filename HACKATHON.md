@@ -46,13 +46,14 @@ Partner connectors (worth considering): TypeSafeAI, Box, Pinecone, Ollama Cloud.
 - **AgentMail** gives the agent an inbox. The connector covers inboxes, messages, threads, send and reply. Incoming mail is **polling only** (no webhooks or websockets).
 
 ## Our plan
-Upscore is a credit-score coach agent. It runs on a Sprite and uses the **AgentMail** connector for email ingestion and replies, plus an LLM connector (OpenRouter, Anthropic or Ollama). See PRD.md.
+Upscore is a credit-score coach agent. It runs on a Sprite and uses three connectors: **Meta (Muse Spark)** for the LLM (Muse Ember handles email extraction), **AgentMail** for email ingestion and replies, and **Slack (Bot)** for chat. See PRD.md.
 
 ## Checklist
 - [ ] Fly.io account + Sprite created
 - [ ] AgentMail connector set up and access granted to the sprite
-- [ ] LLM connector set up
-- [ ] Telegram bot token
+- [ ] Meta (Muse Spark) connector set up (key from dev.meta.ai)
+- [ ] Slack (Bot) connector set up, bot invited to a channel
+- [ ] Telegram bot token (optional)
 - [ ] Deploy and run as a Sprite service
 - [ ] Record the demo video and post it tagging @flydotio
 - [ ] Submit the form before **Nov 29, 11:59pm PST**
