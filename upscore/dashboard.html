@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Upscore: your credit coach</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#262a33; --fg:#e8eaf0; --mut:#8a90a0;
+          --good:#3ecf8e; --ok:#f5b942; --bad:#f2555a; --acc:#7c8cff; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f7f9; --card:#fff; --line:#e4e6eb; --fg:#15171c; --mut:#6b7080; } }
+  * { box-sizing:border-box } body { margin:0; font:15px/1.45 system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg) }
+  main { max-width:1100px; margin:0 auto; padding:20px; display:grid; gap:16px; grid-template-columns:1fr 1fr }
+  header { grid-column:1/-1; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap }
+  h1 { margin:0; font-size:22px } h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut) }
+  .mut { color:var(--mut) } .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px }
+  .wide { grid-column:1/-1 } .big { font-size:40px; font-weight:700; font-variant-numeric:tabular-nums }
+  .bar { height:10px; background:var(--line); border-radius:6px; overflow:hidden; margin:8px 0 }
+  .bar > i { display:block; height:100% }
+  .good{color:var(--good)} .ok{color:var(--ok)} .bad{color:var(--bad)}
+  ol { margin:0; padding-left:20px } ol li { margin-bottom:10px } ol li small { display:block; color:var(--mut) }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums } td,th { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line) }
+  th { color:var(--mut); font-weight:500; font-size:13px } td.n { text-align:right }
+  #log { height:300px; overflow:auto; display:flex; flex-direction:column; gap:8px; margin-bottom:10px }
+  .msg { padding:8px 12px; border-radius:12px; max-width:85%; white-space:pre-wrap }
+  .me { align-self:flex-end; background:var(--acc); color:#fff } .bot { align-self:flex-start; background:var(--line) }
+  form { display:flex; gap:8px } input { flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--fg); font:inherit }
+  button { padding:10px 16px; border-radius:10px; border:0; background:var(--acc); color:#fff; font:inherit; cursor:pointer }
+  @media (max-width:760px) { main { grid-template-columns:1fr } }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>📈 Upscore</h1><span class="mut" id="sub">your personal credit coach</span></header>
+
+  <section class="card">
+    <h2>Credit utilization</h2>
+    <div class="big" id="util">–</div>
+    <div class="bar"><i id="utilbar"></i></div>
+    <div class="mut" id="utilnote">Tell me your card limits and balances to start.</div>
+  </section>
+
+  <section class="card">
+    <h2>Last 30 days</h2>
+    <div class="big" id="spend">–</div>
+    <div class="mut" id="spendnote"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>Your pathway</h2>
+    <ol id="plan"></ol>
+  </section>
+
+  <section class="card">
+    <h2>Cards</h2>
+    <table><thead><tr><th>Card</th><th class="n">Balance</th><th class="n">Util</th><th>Due</th><th>Closes</th></tr></thead><tbody id="accts"></tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>Subscriptions</h2>
+    <table><tbody id="subs"></tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>Talk to Upscore</h2>
+    <div id="log"></div>
+    <form id="f"><input id="q" placeholder="e.g. spent $42 on dinner with my Amex" autocomplete="off"><button>Send</button></form>
+  </section>
+
+  <section class="card">
+    <h2>Recent activity</h2>
+    <table><tbody id="recent"></tbody></table>
+  </section>
+</main>
+<script>
+const tok = new URLSearchParams(location.search).get('token') || '';
+const H = tok ? {'X-Token': tok} : {};
+const $ = id => document.getElementById(id);
+const money = n => '$' + Number(n || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const pct = u => u == null ? '–' : Math.round(u * 100) + '%';
+const cls = u => u == null ? '' : u <= .10 ? 'good' : u <= .30 ? 'ok' : 'bad';
+// All data can originate from emails, so build DOM with textContent only (no innerHTML of data).
+function el(tag, text, className) { const e = document.createElement(tag); if (text != null) e.textContent = text; if (className) e.className = className; return e; }
+function row(cells) { const tr = el('tr'); cells.forEach(([t, c]) => tr.append(el('td', t, c))); return tr; }
+
+async function refresh() {
+  const r = await fetch('/api/summary', {headers: H});
+  if (!r.ok) return;
+  const d = await r.json();
+  const u = d.utilization.overall;
+  $('util').textContent = pct(u); $('util').className = 'big ' + cls(u);
+  $('utilbar').style.width = Math.min(100, (u || 0) * 100) + '%';
+  $('utilbar').style.background = `var(--${cls(u) || 'line'})`;
+  if (u != null) $('utilnote').textContent = `${money(d.utilization.balance)} of ${money(d.utilization.limit)}. Aim for under 10%.`;
+  $('spend').textContent = money(d.spend_30d);
+  const cats = Object.entries(d.spend_by_category_30d).slice(0, 4).map(([k, v]) => `${k} ${money(v)}`).join(' · ');
+  $('spendnote').textContent = (d.income_30d ? `Income ${money(d.income_30d)} · ` : '') + cats;
+  if (d.profile && d.profile.credit_score) $('sub').textContent = `score ${d.profile.credit_score}` + (d.profile.goal ? ` → goal ${d.profile.goal}` : '');
+  if (d.inbox) $('sub').textContent += ` · forward receipts to ${d.inbox}`;
+
+  $('plan').replaceChildren(...d.plan.map(a => { const li = el('li', a.title); li.append(el('small', a.why)); return li; }));
+  $('accts').replaceChildren(...d.accounts.filter(a => a.kind === 'credit').map(a => row([
+    [a.name], [money(a.balance), 'n'], [pct(d.utilization.per_card[a.name]), 'n ' + cls(d.utilization.per_card[a.name])],
+    [a.next_due || '–'], [a.next_statement || '–']])));
+  const subs = d.subscriptions.map(s => row([[s.merchant], [s.category || ''], [money(s.monthly) + '/mo', 'n']]));
+  $('subs').replaceChildren(...(subs.length ? subs : [row([['None detected yet', 'mut']])]));
+  $('recent').replaceChildren(...d.recent.map(t => row([[t.date, 'mut'], [t.merchant], [t.kind === 'purchase' ? '' : t.kind, 'mut'],
+    [(t.kind === 'purchase' ? '-' : '+') + money(t.amount), 'n']])));
+}
+
+function say(text, who) { const m = el('div', text, 'msg ' + who); $('log').append(m); $('log').scrollTop = 1e9; return m; }
+$('f').onsubmit = async e => {
+  e.preventDefault(); const text = $('q').value.trim(); if (!text) return;
+  $('q').value = ''; say(text, 'me'); const wait = say('…', 'bot');
+  try {
+    const r = await fetch('/api/chat', {method: 'POST', headers: {...H, 'Content-Type': 'application/json'}, body: JSON.stringify({text})});
+    const d = await r.json(); wait.textContent = d.reply || ('Error: ' + d.error);
+  } catch (err) { wait.textContent = 'Error: ' + err; }
+  refresh();
+};
+refresh(); setInterval(refresh, 15000);
+</script>
+</body>
+</html>
