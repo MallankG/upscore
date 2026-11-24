@@ -69,7 +69,7 @@ class Mock(BaseHTTPRequestHandler):
         if "conversations.history" in self.path:
             return self.reply({"ok": True, "messages": [
                 {"ts": "1795000002.000200", "bot_id": "B1", "text": "earlier bot reply"},
-                {"ts": "1795000001.000100", "user": "U1", "text": "slack: lunch 12.50 chipotle"}]})
+                {"ts": "1795000001.000100", "user": "U1", "text": "<@U0BOT1> slack: lunch 12.50 chipotle"}]})
         self.reply({})
 
     def do_POST(self):
@@ -164,6 +164,7 @@ class IntegrationTest(unittest.TestCase):
         self.assertFalse(self.posts("/chat/completions"))
         self.channels.poll_slack_once()
         self.assertEqual({b["model"] for b in self.posts("/chat/completions")}, {"muse-spark-1.3"})
+        self.assertEqual(self.posts("/chat/completions")[0]["messages"][-1]["content"], "slack: lunch 12.50 chipotle")
         sent = self.posts("/chat.postMessage")
         self.assertEqual([s["text"] for s in sent], ["Logged it."])
         self.assertEqual(self.db.kv_get("slack_oldest"), "1795000002.000200")

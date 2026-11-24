@@ -1,6 +1,7 @@
 """Inbound/outbound channels: AgentMail (via Sprites connector), Telegram, and the reminder scheduler."""
 import json
 import logging
+import re
 import os
 import subprocess
 import time
@@ -170,7 +171,8 @@ def poll_slack_once():
         if m.get("bot_id") or (m.get("subtype") not in (None, "file_share")) or not (m.get("text") or m.get("files")):
             continue  # skip our own replies, joins, edits
         try:
-            reply = agent.respond("slack", m.get("text", ""), "slack", [slack_file(f) for f in m.get("files", [])])
+            text = re.sub(r"<@[A-Z0-9]+>", "", m.get("text", "")).strip()  # drop Slack @mention tags
+        reply = agent.respond("slack", text, "slack", [slack_file(f) for f in m.get("files", [])])
         except (ValueError, PermissionError) as e:
             reply = str(e)
         slack("chat.postMessage", {"channel": SLACK_CHANNEL, "text": reply[:3900]})
