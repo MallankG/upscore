@@ -364,5 +364,16 @@ class IntegrationTest(unittest.TestCase):
                 os.environ.pop(k)
 
 
+    def test_18_rate_limit_raises_with_retry_after(self):
+        import urllib.error, io
+        from unittest import mock
+        err = urllib.error.HTTPError("http://x", 429, "Too Many", {"Retry-After": "61"}, io.BytesIO(b"{}"))
+        with mock.patch("urllib.request.urlopen", side_effect=err):
+            with self.assertRaises(self.agent.RateLimited) as e:
+                self.agent.http_json("GET", "http://x/conversations.history")
+        self.assertEqual(e.exception.wait, 61.0)
+        self.assertGreaterEqual(self.channels.SLACK_POLL_SECS, 60)
+
+
 if __name__ == "__main__":
     unittest.main()

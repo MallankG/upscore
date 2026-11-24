@@ -36,6 +36,16 @@ HISTORY_TURNS = 12
 TURN_LOCK = threading.Lock()
 
 
+class RateLimited(RuntimeError):
+    """A provider said slow down; .wait is how long (seconds) it asked for, default 60."""
+    def __init__(self, retry_after, msg):
+        super().__init__(msg)
+        try:
+            self.wait = max(1.0, float(retry_after))
+        except (TypeError, ValueError):
+            self.wait = 60.0
+
+
 def http_json(method, url, body=None, headers=None, timeout=90):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
@@ -46,6 +56,8 @@ def http_json(method, url, body=None, headers=None, timeout=90):
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:  # keep the provider's explanation (e.g. Meta billing, AgentMail permission)
         detail = e.read()[:500].decode(errors="replace")
+        if e.code == 429:
+            raise RateLimited(e.headers.get("Retry-After"), f"429 from {url.split('?')[0]}") from None
         raise RuntimeError(f"{e.code} from {url.split('?')[0]}: {detail}") from None
 
 

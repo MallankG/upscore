@@ -28,7 +28,7 @@ EMAIL_POLL_SECS = int(os.environ.get("EMAIL_POLL_SECS", "60"))
 SLACK_BASE = connectors.base("slack_bot")
 SLACK_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")    # local dev only; on a Sprite the connector injects it
 SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "")    # channel or DM id the bot watches, e.g. C0123 / D0456
-SLACK_POLL_SECS = int(os.environ.get("SLACK_POLL_SECS", "5"))
+SLACK_POLL_SECS = int(os.environ.get("SLACK_POLL_SECS", "65"))  # Slack allows ~1 history call/min for unlisted apps
 
 
 # ---------- AgentMail ----------
@@ -263,6 +263,9 @@ def loop(fn, every, name):
     while True:
         try:
             fn()
+        except agent.RateLimited as e:  # back off exactly as long as the provider asked
+            log.warning("%s rate-limited; waiting %.0fs", name, e.wait)
+            time.sleep(e.wait)
         except Exception:
             log.exception("%s failed", name)
             time.sleep(10)
