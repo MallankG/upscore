@@ -170,9 +170,9 @@ def poll_slack_once():
         db.kv_set("slack_oldest", m["ts"])
         if m.get("bot_id") or (m.get("subtype") not in (None, "file_share")) or not (m.get("text") or m.get("files")):
             continue  # skip our own replies, joins, edits
+        text = re.sub(r"<@[A-Z0-9]+>", "", m.get("text", "")).strip()  # drop Slack @mention tags
         try:
-            text = re.sub(r"<@[A-Z0-9]+>", "", m.get("text", "")).strip()  # drop Slack @mention tags
-        reply = agent.respond("slack", text, "slack", [slack_file(f) for f in m.get("files", [])])
+            reply = agent.respond("slack", text, "slack", [slack_file(f) for f in m.get("files", [])])
         except (ValueError, PermissionError) as e:
             reply = str(e)
         slack("chat.postMessage", {"channel": SLACK_CHANNEL, "text": reply[:3900]})
