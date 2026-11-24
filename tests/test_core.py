@@ -82,6 +82,33 @@ class DbTest(unittest.TestCase):
         self.assertEqual(db.q("SELECT balance FROM accounts WHERE name='amex'")[0]["balance"], 60)
 
 
+class GamifyTest(unittest.TestCase):
+    def test_levels(self):
+        from upscore import gamify
+        self.assertEqual(gamify.level_for(0), (1, 0, 100))
+        self.assertEqual(gamify.level_for(100), (2, 0, 150))
+        self.assertEqual(gamify.level_for(260), (3, 10, 200))
+
+    def test_daily_streak_survives_until_tomorrow(self):
+        from upscore import gamify
+        day = date(2025, 3, 10)  # far from real "today", which other tests' agent turns mark active
+        for d in ("2025-03-07", "2025-03-08", "2025-03-09"):
+            db.kv_set("day:" + d, 1)
+        self.assertEqual(gamify.daily_streak(day), (3, False))      # today not done yet: still 3
+        gamify.record_activity(day)
+        self.assertEqual(gamify.daily_streak(day), (4, True))
+        self.assertEqual(gamify.daily_streak(date(2025, 3, 12))[0], 0)  # skipped the 11th
+
+    def test_state_stage_mood_and_path(self):
+        from upscore import gamify
+        st = gamify.state([card()], [], T)
+        self.assertEqual(st["mood"], "worried")  # 72% utilization
+        self.assertEqual(st["path"][0]["id"], "card_added")
+        cur = [p for p in st["path"] if p["current"]]
+        self.assertEqual(len(cur), 1)
+        self.assertIn(st["stage"], [n for _, n in gamify.STAGES])
+
+
 class AgentLoopTest(unittest.TestCase):
     def test_tool_call_then_reply(self):
         script = [

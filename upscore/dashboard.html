@@ -3,178 +3,451 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Upscore: your credit coach</title>
+<title>upscore</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#0f1115; --card:#181b22; --line:#262a33; --fg:#e8eaf0; --mut:#8a90a0;
-          --good:#3ecf8e; --ok:#f5b942; --bad:#f2555a; --acc:#7c8cff; }
-  @media (prefers-color-scheme: light) { :root { --bg:#f6f7f9; --card:#fff; --line:#e4e6eb; --fg:#15171c; --mut:#6b7080; } }
-  * { box-sizing:border-box } body { margin:0; font:15px/1.45 system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg) }
-  main { max-width:1100px; margin:0 auto; padding:20px; display:grid; gap:16px; grid-template-columns:1fr 1fr }
-  header { grid-column:1/-1; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap }
-  h1 { margin:0; font-size:22px } h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut) }
-  .mut { color:var(--mut) } .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px }
-  .wide { grid-column:1/-1 } .big { font-size:40px; font-weight:700; font-variant-numeric:tabular-nums }
-  .bar { height:10px; background:var(--line); border-radius:6px; overflow:hidden; margin:8px 0 }
-  .bar > i { display:block; height:100% }
-  .good{color:var(--good)} .ok{color:var(--ok)} .bad{color:var(--bad)}
-  ol { margin:0; padding-left:20px } ol li { margin-bottom:10px } ol li small { display:block; color:var(--mut) }
-  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums } td,th { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line) }
-  th { color:var(--mut); font-weight:500; font-size:13px } td.n { text-align:right }
-  #log { height:300px; overflow:auto; display:flex; flex-direction:column; gap:8px; margin-bottom:10px }
-  .msg { padding:8px 12px; border-radius:12px; max-width:85%; white-space:pre-wrap }
-  .me { align-self:flex-end; background:var(--acc); color:#fff } .bot { align-self:flex-start; background:var(--line) }
-  form { display:flex; gap:8px } input { flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--fg); font:inherit }
-  button { padding:10px 16px; border-radius:10px; border:0; background:var(--acc); color:#fff; font:inherit; cursor:pointer }
-  .row { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap } .ghost { background:transparent; border:1px solid var(--line); color:var(--fg) }
-  #chart { width:100%; height:150px; display:block } #chart text { fill:var(--mut); font-size:11px }
-  .streak { font-size:22px; font-weight:700 }
-  @media (max-width:760px) { main { grid-template-columns:1fr } }
+:root {
+  --paper: oklch(97.5% 0.014 85); --paper-2: oklch(94.5% 0.022 82); --line: oklch(89% 0.024 80);
+  --ink: oklch(27% 0.035 262); --ink-2: oklch(47% 0.03 262); --ink-3: oklch(62% 0.025 262);
+  --tang: oklch(71% 0.165 50); --tang-d: oklch(59% 0.165 45); --tang-l: oklch(93% 0.05 60);
+  --gold: oklch(84% 0.15 87); --gold-d: oklch(70% 0.14 75);
+  --leaf: oklch(67% 0.155 145); --leaf-d: oklch(54% 0.145 145);
+  --cran: oklch(58% 0.185 22); --cran-d: oklch(48% 0.17 22);
+  --lock: oklch(90% 0.012 80); --lock-d: oklch(80% 0.015 80);
+  --display: "Fredoka", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  --body: "Figtree", system-ui, sans-serif;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+* { box-sizing: border-box }
+html { background: var(--paper) }
+body { margin: 0; color: var(--ink); font: 500 16px/1.45 var(--body); -webkit-font-smoothing: antialiased }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -0.01em; margin: 0 }
+button, input { font: inherit; color: inherit }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0) }
+
+/* top bar */
+.top { position: sticky; top: 0; z-index: 10; background: color-mix(in oklch, var(--paper) 92%, transparent);
+       backdrop-filter: saturate(1.4) blur(8px); border-bottom: 2px solid var(--line) }
+.top-in { max-width: 1240px; margin: 0 auto; padding: 10px clamp(16px, 3vw, 32px); display: flex; align-items: center; gap: 20px }
+.wordmark { font: 700 28px/1 var(--display); color: var(--tang-d); letter-spacing: -0.03em; margin-right: auto }
+.wordmark span { color: var(--ink) }
+.stat { display: flex; align-items: center; gap: 6px; font: 700 18px/1 var(--display) }
+.stat svg { width: 26px; height: 26px }
+.stat.flame { color: var(--tang-d) } .stat.flame.cold { color: var(--ink-3); filter: grayscale(1) }
+.stat.shield { color: var(--leaf-d) } .stat.coin { color: var(--gold-d) }
+.lvl { font: 700 15px/1 var(--display); background: var(--ink); color: var(--paper); padding: 7px 12px; border-radius: 99px }
+
+/* layout */
+.wrap { max-width: 1240px; margin: 0 auto; padding: clamp(20px, 3vw, 36px) clamp(16px, 3vw, 32px) 170px;
+        display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr) minmax(270px, 320px); gap: clamp(24px, 3vw, 44px); align-items: start }
+.left { position: sticky; top: 84px; display: grid; gap: 22px }
+.right { display: grid; gap: 34px }
+@media (max-width: 1100px) { .wrap { grid-template-columns: minmax(280px, 340px) 1fr } .right { grid-column: 1 / -1; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)) } }
+@media (max-width: 760px) { .wrap { grid-template-columns: 1fr } .left { position: static } .top-in { gap: 12px } .wordmark { font-size: 24px }
+  .stat { font-size: 16px } .stat svg { width: 22px; height: 22px } }
+.label { font: 700 13px/1 var(--body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); margin: 0 0 12px }
+
+/* Pip */
+.pip { display: grid; grid-template-columns: 132px 1fr; gap: 6px; align-items: end }
+.pip svg { width: 132px; height: 150px; overflow: visible }
+.bubble { position: relative; background: var(--paper); border: 2px solid var(--line); border-radius: 18px 18px 18px 4px;
+          padding: 12px 14px; font-weight: 600; margin: 0 0 64px; min-height: 48px }
+.bubble::before { content: ""; position: absolute; left: -10px; bottom: 10px; border: 8px solid transparent; border-right-color: var(--line) }
+.sway { transform-origin: 66px 92px; animation: sway 5s var(--ease) infinite alternate }
+.blink { transform-box: fill-box; transform-origin: center; animation: blink 4.5s infinite }
+@keyframes sway { from { transform: rotate(-3deg) } to { transform: rotate(3deg) } }
+@keyframes blink { 0%, 94%, 100% { transform: scaleY(1) } 97% { transform: scaleY(0.1) } }
+.lvlrow { display: flex; justify-content: space-between; align-items: baseline; margin: 2px 0 8px }
+.lvlrow h2 { font-size: 22px } .lvlrow span { color: var(--ink-2); font-weight: 600; font-size: 14px }
+.bar { height: 16px; border-radius: 99px; background: var(--lock); overflow: hidden }
+.bar > i { display: block; height: 100%; border-radius: 99px; background: var(--gold); box-shadow: inset 0 -4px 0 var(--gold-d);
+           transform-origin: left; transform: scaleX(0); transition: transform 900ms var(--ease) }
+
+/* quest */
+.quest { background: var(--tang-l); border-radius: 20px; padding: 18px 18px 16px }
+.quest h3 { font-size: 20px; line-height: 1.2; margin: 6px 0 6px }
+.quest p { margin: 0 0 14px; color: var(--ink-2); font-size: 14px }
+.quest .label { color: var(--tang-d); margin: 0 }
+.btn { border: 0; cursor: pointer; border-radius: 14px; padding: 12px 18px; font: 700 15px/1 var(--display); letter-spacing: 0.02em;
+       background: var(--tang); color: var(--paper); box-shadow: 0 4px 0 var(--tang-d); transition: transform 80ms, box-shadow 80ms }
+.btn:active { transform: translateY(4px); box-shadow: 0 0 0 var(--tang-d) }
+.btn:focus-visible, .ghost:focus-visible, .node:focus-visible, .icon-btn:focus-within { outline: 3px solid var(--ink); outline-offset: 3px }
+.ghost { border: 2px solid var(--line); background: var(--paper); color: var(--ink-2); box-shadow: 0 3px 0 var(--line); border-radius: 12px;
+         padding: 8px 12px; font: 700 14px/1 var(--display); cursor: pointer }
+.ghost:active { transform: translateY(3px); box-shadow: none }
+.side { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px }
+.side li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; font-size: 14px; font-weight: 600 }
+.dot { width: 14px; height: 14px; border-radius: 50%; margin-top: 3px; border: 3px solid var(--lock-d) }
+
+/* path */
+.unit { background: var(--leaf); color: var(--paper); border-radius: 20px; padding: 18px 22px; box-shadow: 0 5px 0 var(--leaf-d);
+        display: flex; justify-content: space-between; align-items: center; gap: 12px }
+.unit small { display: block; font: 600 14px/1.3 var(--body); opacity: 0.92; margin-top: 4px }
+.unit h1 { font-size: 26px }
+.score { text-align: right; font: 700 40px/1 var(--display) } .score small { display: block; font: 600 13px var(--body); margin-top: 4px }
+.path { list-style: none; margin: 40px 0 0; padding: 0; display: grid; gap: 24px }
+.path li { display: flex; align-items: center; gap: 18px; opacity: 0; transform: translateY(12px); animation: rise 600ms var(--ease) forwards }
+@keyframes rise { to { opacity: 1; transform: none } }
+.node { flex: none; width: 76px; height: 70px; border-radius: 50%; border: 0; display: grid; place-items: center; position: relative; cursor: pointer;
+        background: var(--lock); box-shadow: 0 7px 0 var(--lock-d); color: var(--ink-3); transition: transform 80ms, box-shadow 80ms }
+.node:active { transform: translateY(6px); box-shadow: 0 1px 0 var(--lock-d) }
+.node svg { width: 34px; height: 34px }
+.done .node { background: var(--gold); box-shadow: 0 7px 0 var(--gold-d); color: var(--ink) }
+.now .node { background: var(--tang); box-shadow: 0 7px 0 var(--tang-d); color: var(--paper) }
+.now .node::after { content: ""; position: absolute; inset: -10px; border-radius: 50%; border: 4px solid var(--tang); animation: ring 1.8s var(--ease) infinite }
+@keyframes ring { from { transform: scale(0.92); opacity: 0.5 } to { transform: scale(1.14); opacity: 0 } }
+.ntext b { display: block; font: 600 18px/1.2 var(--display) } .ntext span { font-size: 14px; color: var(--ink-2) }
+.locked .ntext b { color: var(--ink-2) } .now .ntext b { color: var(--tang-d) }
+.tag { display: inline-block; font: 700 11px/1 var(--display); letter-spacing: 0.08em; padding: 5px 8px; border-radius: 8px;
+       background: var(--tang); color: var(--paper); margin-left: 8px; vertical-align: 3px }
+.path li:nth-child(4n+2), .path li:nth-child(4n+4) { margin-left: clamp(24px, 7vw, 90px) }
+.path li:nth-child(4n+3) { margin-left: clamp(48px, 12vw, 160px) }
+
+/* right column */
+.badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 16px 8px }
+.badge { text-align: center; font: 600 13px/1.2 var(--display); color: var(--ink-3) }
+.badge .hex { width: 62px; height: 62px; margin: 0 auto 6px; display: grid; place-items: center; position: relative }
+.hex::before { content: ""; position: absolute; inset: 0; background: var(--lock); clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%) }
+.badge.on .hex::before, .toast .hex::before { background: var(--gold) }
+.hex svg { position: relative; width: 28px; height: 28px; color: var(--ink-3) }
+.badge.on .hex svg { color: var(--ink) } .badge.on { color: var(--ink) }
+.badge progress { display: block; width: 50px; height: 6px; margin: 5px auto 0; appearance: none; border: 0; border-radius: 99px; background: var(--lock); overflow: hidden }
+.badge progress::-webkit-progress-bar { background: var(--lock) } .badge progress::-webkit-progress-value { background: var(--tang) }
+.badge progress::-moz-progress-bar { background: var(--tang) }
+.cards { display: grid; gap: 18px }
+.crd .row { display: flex; justify-content: space-between; gap: 8px; font-weight: 700 }
+.crd .row span { color: var(--ink-2); font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums }
+.meter { position: relative; height: 12px; border-radius: 99px; background: var(--lock); margin: 8px 0 5px }
+.meter > i { position: absolute; inset: 0 auto 0 0; border-radius: 99px }
+.meter::before, .meter::after { content: ""; position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink-3); opacity: 0.45; z-index: 1 }
+.meter::before { left: 10% } .meter::after { left: 30% }
+.crd small { color: var(--ink-3); font-size: 13px; font-weight: 600 }
+.leaks { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px }
+.leaks li { display: flex; align-items: center; gap: 10px; font-weight: 600 }
+.leaks li span { margin-left: auto; color: var(--ink-2); font-variant-numeric: tabular-nums }
+.leaks button { padding: 5px 9px; font-size: 12px }
+#chart { width: 100%; height: 120px; display: block; overflow: visible } #chart text { fill: var(--ink-3); font: 600 11px var(--body) }
+details summary { cursor: pointer; list-style: none; margin: 0 } details summary::-webkit-details-marker { display: none }
+.act { list-style: none; padding: 0; margin: 12px 0 0; font-size: 14px; display: grid; gap: 7px }
+.act li { display: flex; gap: 10px } .act li span:first-child { color: var(--ink-3); width: 48px }
+.act li span:last-child { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 700 }
+.act .in { color: var(--leaf-d) }
+.empty { color: var(--ink-2); font-size: 14px; margin: 0; font-weight: 500 }
+
+/* composer + chat */
+.dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; pointer-events: none;
+        background: linear-gradient(to top, var(--paper) 55%, transparent) }
+.dock-in { max-width: 760px; margin: 0 auto; padding: 24px 16px 18px; pointer-events: auto }
+.log { display: grid; gap: 8px; max-height: 40vh; overflow-y: auto; padding: 4px 2px 12px }
+.log:empty { display: none }
+.msg { max-width: 82%; padding: 10px 14px; border-radius: 18px; white-space: pre-wrap; animation: rise 300ms var(--ease) forwards; opacity: 0; transform: translateY(8px) }
+.me { justify-self: end; background: var(--ink); color: var(--paper); border-bottom-right-radius: 4px }
+.bot { justify-self: start; background: var(--paper); border: 2px solid var(--line); border-bottom-left-radius: 4px }
+.compose { display: flex; gap: 8px; background: var(--paper); border: 2px solid var(--line); border-radius: 20px; padding: 8px;
+           box-shadow: 0 6px 0 var(--line), 0 18px 40px -22px oklch(27% 0.035 262 / 0.4) }
+.compose input[type=text] { flex: 1; border: 0; background: transparent; padding: 8px 10px; outline: none; min-width: 0 }
+.icon-btn { width: 44px; height: 44px; flex: none; border-radius: 14px; display: grid; place-items: center; cursor: pointer; background: var(--paper-2); color: var(--ink-2) }
+.icon-btn svg { width: 22px; height: 22px }
+.compose .btn { padding: 0 18px }
+
+/* unlock toast */
+.toast { position: fixed; left: 50%; top: 86px; z-index: 30; transform: translate(-50%, -20px); opacity: 0; pointer-events: none;
+         background: var(--ink); color: var(--paper); border-radius: 20px; padding: 12px 22px 12px 12px; display: flex; gap: 14px; align-items: center;
+         transition: opacity 400ms var(--ease), transform 500ms var(--ease) }
+.toast.show { opacity: 1; transform: translate(-50%, 0) }
+.toast .hex { width: 52px; height: 52px; display: grid; place-items: center; position: relative }
+.toast .hex svg { width: 24px; height: 24px; color: var(--ink) }
+.toast b { display: block; font: 600 18px/1.2 var(--display) } .toast span { font-size: 14px; color: var(--gold) }
+.confetti { position: fixed; top: 110px; left: 50%; width: 10px; height: 14px; border-radius: 2px; z-index: 29; pointer-events: none; animation: fall 1100ms var(--ease) forwards }
+@keyframes fall { to { transform: translate(var(--x), var(--y)) rotate(var(--r)); opacity: 0 } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important }
+  .path li, .msg { opacity: 1; transform: none } }
 </style>
 </head>
 <body>
-<main>
-  <header><h1>📈 Upscore</h1><span class="mut" id="sub">your personal credit coach</span></header>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path fill="currentColor" d="M12.6 2.2c.4 3-1.6 4.3-3 6.3-1.2 1.7-2.1 3.3-2.1 5.6 0 3.5 2.6 6.4 6 6.4s5.9-2.6 5.9-6.2c0-2.4-1.1-4.2-2.5-5.6.1 1.7-.5 3-1.8 3.6.4-3.8-.6-7-2.5-10.1z"/><path fill="var(--paper)" opacity=".55" d="M12.3 13.2c-1.2 1.3-2 2.3-2 3.7 0 1.5 1.1 2.6 2.5 2.6s2.4-1.1 2.4-2.6c0-1.3-.8-2.4-2.9-3.7z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2.5 4.5 5.4v5.5c0 4.8 3.2 8.6 7.5 10.6 4.3-2 7.5-5.8 7.5-10.6V5.4z"/><path fill="none" stroke="var(--paper)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="m8.6 12 2.4 2.4 4.6-4.8"/></symbol>
+  <symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="currentColor"/><circle cx="12" cy="12" r="6.2" fill="none" stroke="var(--paper)" stroke-width="1.8" opacity=".7"/><path fill="var(--paper)" d="M12 8.2l1.2 2.5 2.6.3-1.9 1.8.5 2.6-2.4-1.3-2.4 1.3.5-2.6-1.9-1.8 2.6-.3z"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path stroke="currentColor" stroke-width="2.6" d="M2.5 10h19"/><path stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M6.5 15h4"/></symbol>
+  <symbol id="i-receipt" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" d="M5.5 2.8h13v18.4l-2.2-1.4-2.1 1.4-2.2-1.4-2.2 1.4-2.1-1.4-2.2 1.4z"/><path stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M9 8h6M9 12h6M9 16h3"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16M7 12h10"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M3.5 17a8.5 8.5 0 1 1 17 0"/><path stroke="currentColor" stroke-width="2.6" stroke-linecap="round" d="m12 17-3.5-5"/><circle cx="12" cy="17" r="1.8" fill="currentColor"/></symbol>
+  <symbol id="i-trend" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="m3 17 6-6 4 4 8-8M15 7h6v6"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M5 21V3.5"/><path fill="currentColor" d="M5 4h12.5l-2.6 4.2 2.6 4.3H5z"/></symbol>
+  <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="6" cy="17" r="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M8.4 8.6 20 18M8.4 15.4 20 6"/></symbol>
+  <symbol id="i-turkey" viewBox="0 0 24 24"><path fill="currentColor" opacity=".55" d="M12 3a9 9 0 0 0-9 9h3.2a5.8 5.8 0 0 1 11.6 0H21a9 9 0 0 0-9-9z"/><circle cx="12" cy="14.5" r="5.5" fill="currentColor"/><circle cx="12" cy="9.4" r="2.6" fill="currentColor"/><circle cx="12.9" cy="9" r=".75" fill="var(--paper)"/><path fill="var(--cran)" d="M11.2 11.2c-.3 1-.1 1.8.6 2.2.2-.8.1-1.5-.6-2.2z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5" fill="currentColor"/><path fill="none" stroke="currentColor" stroke-width="2.4" d="M8.2 10.5V8a3.8 3.8 0 0 1 7.6 0v2.5"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4l7.3-7.3"/></symbol>
+</defs></svg>
 
-  <section class="card">
-    <h2>Credit utilization</h2>
-    <div class="big" id="util">–</div>
-    <div class="bar"><i id="utilbar"></i></div>
-    <div class="mut" id="utilnote">Tell me your card limits and balances to start.</div>
-  </section>
+<header class="top"><div class="top-in">
+  <div class="wordmark">up<span>score</span></div>
+  <div class="stat flame cold" id="s-flame" title="Daily check-in streak"><svg><use href="#i-flame"/></svg><span>0</span></div>
+  <div class="stat shield" title="Months paid on time on every card"><svg><use href="#i-shield"/></svg><span id="s-shield">0</span></div>
+  <div class="stat coin" title="XP"><svg><use href="#i-coin"/></svg><span id="s-xp">0</span></div>
+  <div class="lvl" id="s-lvl">Lv 1</div>
+</div></header>
 
-  <section class="card">
-    <h2>Last 30 days</h2>
-    <div class="big" id="spend">–</div>
-    <div class="mut" id="spendnote"></div>
-  </section>
+<main class="wrap">
+  <aside class="left">
+    <section aria-label="Pip, your credit buddy">
+      <div class="pip">
+        <svg id="pip" viewBox="0 0 132 150" role="img" aria-label="Pip"></svg>
+        <p class="bubble" id="bubble">Hi, I'm Pip.</p>
+      </div>
+      <div class="lvlrow"><h2 id="lvl-name">Level 1 · Seed</h2><span id="lvl-xp">0 / 100 XP</span></div>
+      <div class="bar" role="progressbar" aria-label="XP to next level" aria-valuemin="0" aria-valuemax="100" id="xpbar"><i></i></div>
+    </section>
 
-  <section class="card wide">
-    <h2>Credit score</h2>
-    <div style="display:flex;gap:24px;align-items:baseline;flex-wrap:wrap">
-      <div><span class="big" id="score">–</span> <span class="mut" id="scoredelta"></span></div>
-      <div><span class="streak" id="streak">🔥 0</span> <span class="mut">month on-time streak</span></div>
+    <section class="quest">
+      <p class="label">Today's quest</p>
+      <h3 id="q-title">Add your first card</h3>
+      <p id="q-why">Tell Pip a card's limit, balance, statement day and due day.</p>
+      <button class="btn" id="q-go" type="button">Start quest</button>
+    </section>
+
+    <section>
+      <p class="label">Side quests</p>
+      <ul class="side" id="side"></ul>
+    </section>
+  </aside>
+
+  <section aria-labelledby="unit-title">
+    <div class="unit">
+      <div><h1 id="unit-title">Road to a better score</h1><small id="unit-sub">Every milestone grows Pip.</small></div>
+      <div class="score"><span id="score">–</span><small>credit score</small></div>
     </div>
-    <svg id="chart" role="img" aria-label="Credit score history"></svg>
-    <div class="mut" id="chartnote">Tell me your score whenever you check it ("my score is 655") and I'll chart it.</div>
+    <ol class="path" id="path"></ol>
   </section>
 
-  <section class="card wide">
-    <h2>Your pathway</h2>
-    <ol id="plan"></ol>
-  </section>
-
-  <section class="card">
-    <h2>Cards</h2>
-    <table><thead><tr><th>Card</th><th class="n">Balance</th><th class="n">Util</th><th>Due</th><th>Closes</th></tr></thead><tbody id="accts"></tbody></table>
-  </section>
-
-  <section class="card">
-    <h2>Subscriptions</h2>
-    <table><tbody id="subs"></tbody></table>
-  </section>
-
-  <section class="card">
-    <h2>Talk to Upscore</h2>
-    <div id="log"></div>
-    <form id="f"><input id="q" placeholder="e.g. spent $42 on dinner with my Amex" autocomplete="off"><button>Send</button></form>
-    <div class="row">
-      <label class="ghost" style="padding:8px 12px;border-radius:10px;cursor:pointer">📎 Statement / receipt
-        <input id="file" type="file" accept="image/*,application/pdf" hidden></label>
-      <button class="ghost" type="button" id="sim">🧮 What if I pay…</button>
-      <button class="ghost" type="button" id="uncle">🦃 Uncle Gary mode</button>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>Recent activity</h2>
-    <table><tbody id="recent"></tbody></table>
-  </section>
+  <aside class="right">
+    <section><p class="label" id="ach-label">Achievements</p><div class="badges" id="badges"></div></section>
+    <section><p class="label">Card health</p><div class="cards" id="cards"></div></section>
+    <section><p class="label" id="leaks-label">Money leaks</p><ul class="leaks" id="leaks"></ul></section>
+    <section><p class="label">Score history</p><svg id="chart" role="img" aria-label="Credit score history"></svg></section>
+    <details><summary class="label">Recent activity ▾</summary><ul class="act" id="recent"></ul></details>
+  </aside>
 </main>
+
+<div class="dock"><div class="dock-in">
+  <div class="log" id="log" aria-live="polite"></div>
+  <form class="compose" id="f">
+    <label class="icon-btn" title="Send a statement or receipt (photo or PDF)"><svg aria-hidden="true"><use href="#i-clip"/></svg>
+      <span class="sr">Attach a statement</span><input id="file" type="file" accept="image/*,application/pdf" hidden></label>
+    <input type="text" id="q" placeholder="Tell Pip: “spent $42 on dinner with my Amex”" autocomplete="off" aria-label="Message Pip">
+    <button class="btn">Send</button>
+  </form>
+</div></div>
+
+<div class="toast" id="toast" role="status"><div class="hex"><svg id="toast-ic"><use href="#i-flag"/></svg></div><div><b id="toast-t"></b><span id="toast-x"></span></div></div>
+
 <script>
 const tok = new URLSearchParams(location.search).get('token') || '';
 const H = tok ? {'X-Token': tok} : {};
 const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
 const money = n => '$' + Number(n || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const pct = u => u == null ? '–' : Math.round(u * 100) + '%';
-const cls = u => u == null ? '' : u <= .10 ? 'good' : u <= .30 ? 'ok' : 'bad';
-// All data can originate from emails, so build DOM with textContent only (no innerHTML of data).
-function el(tag, text, className) { const e = document.createElement(tag); if (text != null) e.textContent = text; if (className) e.className = className; return e; }
-function row(cells) { const tr = el('tr'); cells.forEach(([t, c]) => tr.append(el('td', t, c))); return tr; }
+// Data can come from emails: build DOM with textContent only, never innerHTML.
+function el(tag, text, cls) { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
+function S(tag, attrs, text) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; }
+function icon(name) { const s = S('svg', {'aria-hidden': 'true'}); s.append(S('use', {href: '#i-' + name})); return s; }
+function fmtDate(s) { return s ? new Date(s + 'T12:00').toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) : '–'; }
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
+/* ---------- Pip: seed -> sprout -> sapling -> bloom -> mighty oak; face follows utilization ---------- */
+function drawPip(stage, mood) {
+  const lv = ['Seed', 'Sprout', 'Sapling', 'Bloom', 'Mighty oak'].indexOf(stage);
+  const [leaf, leafD, ink, paper] = ['--leaf', '--leaf-d', '--ink', '--paper'].map(css);
+  const out = [], plant = [];
+  if (lv >= 1) {
+    const top = [0, 58, 40, 30, 40][lv];
+    plant.push(S('path', {d: `M66 92 C66 ${top + 30} 64 ${top + 14} 66 ${top}`, stroke: leafD, 'stroke-width': 5, fill: 'none', 'stroke-linecap': 'round'}));
+    const leafAt = (y, s, f) => S('path', {d: `M66 ${y} c${f * 14 * s} ${-12 * s} ${f * 30 * s} ${-8 * s} ${f * 34 * s} ${2 * s} c${-f * 10 * s} ${12 * s} ${-f * 26 * s} ${12 * s} ${-f * 34 * s} ${-2 * s}z`,
+                                         fill: leaf, stroke: leafD, 'stroke-width': 2.5, 'stroke-linejoin': 'round'});
+    [[], [[top + 10, .8]], [[top + 32, .9], [top + 12, .75]], [[top + 44, .95], [top + 24, .8]], [[top + 40, .9]]][lv]
+      .forEach(([y, s]) => plant.push(leafAt(y, s, -1), leafAt(y - 4, s, 1)));
+    if (lv === 3) {
+      for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; plant.push(S('circle', {cx: 66 + Math.cos(a) * 11, cy: top - 6 + Math.sin(a) * 11, r: 8, fill: css('--tang'), stroke: css('--tang-d'), 'stroke-width': 2})); }
+      plant.push(S('circle', {cx: 66, cy: top - 6, r: 8, fill: css('--gold'), stroke: css('--gold-d'), 'stroke-width': 2.5}));
+    }
+    if (lv === 4) {
+      [[40, 26, 22], [92, 26, 22], [66, 10, 25], [50, 44, 19], [82, 44, 19]].forEach(([x, y, r]) => plant.push(S('circle', {cx: x, cy: y, r, fill: leaf, stroke: leafD, 'stroke-width': 2.5})));
+      [[46, 36], [88, 32], [68, 18]].forEach(([x, y]) => plant.push(S('ellipse', {cx: x, cy: y + 2, rx: 4.5, ry: 5.5, fill: css('--tang-d')}),
+        S('path', {d: `M${x - 5} ${y - 3}h10`, stroke: ink, 'stroke-width': 2.5, 'stroke-linecap': 'round'})));
+    }
+  }
+  const sway = S('g', {class: 'sway'}); sway.append(...plant); out.push(sway);
+  if (lv === 0) {  // a seed, half tucked into soil
+    out.push(S('ellipse', {cx: 66, cy: 138, rx: 54, ry: 10, fill: css('--paper-2')}),
+             S('path', {d: 'M66 58c26 0 40 24 40 46 0 22-17 36-40 36s-40-14-40-36c0-22 14-46 40-46z', fill: 'oklch(64% 0.09 62)', stroke: 'oklch(45% 0.08 55)', 'stroke-width': 3}),
+             S('path', {d: 'M66 62c-4 10-4 20 0 28', stroke: 'oklch(52% 0.08 55)', 'stroke-width': 3, fill: 'none', 'stroke-linecap': 'round'}));
+  } else {         // terracotta pot
+    out.push(S('ellipse', {cx: 66, cy: 143, rx: 46, ry: 6, fill: css('--paper-2')}),
+             S('path', {d: 'M30 94h72l-9 46H39z', fill: css('--tang'), stroke: css('--tang-d'), 'stroke-width': 3, 'stroke-linejoin': 'round'}),
+             S('rect', {x: 24, y: 84, width: 84, height: 16, rx: 6, fill: css('--tang'), stroke: css('--tang-d'), 'stroke-width': 3}));
+  }
+  const fy = lv === 0 ? 102 : 115;
+  out.push(S('ellipse', {cx: 54, cy: fy, rx: 4.5, ry: 6, fill: ink, class: 'blink'}), S('ellipse', {cx: 78, cy: fy, rx: 4.5, ry: 6, fill: ink, class: 'blink'}),
+           S('circle', {cx: 55.5, cy: fy - 2, r: 1.6, fill: paper}), S('circle', {cx: 79.5, cy: fy - 2, r: 1.6, fill: paper}),
+           S('ellipse', {cx: 44, cy: fy + 9, rx: 6, ry: 3.5, fill: css('--cran'), opacity: .3}), S('ellipse', {cx: 88, cy: fy + 9, rx: 6, ry: 3.5, fill: css('--cran'), opacity: .3}));
+  if (mood === 'worried') out.push(S('path', {d: `M48 ${fy - 11} l9 3 M84 ${fy - 11} l-9 3`, stroke: ink, 'stroke-width': 3, 'stroke-linecap': 'round'}),
+                                   S('path', {d: `M99 ${fy - 16} q5 8 0 11 q-5 -3 0 -11z`, fill: 'oklch(78% 0.08 235)'}));
+  out.push(S('path', {d: {happy: `M58 ${fy + 9} q8 9 16 0z`, okay: `M59 ${fy + 12} h14`, worried: `M57 ${fy + 15} q4.5 -5 9 0 q4.5 5 9 0`}[mood],
+                      stroke: ink, 'stroke-width': 3.5, fill: mood === 'happy' ? css('--cran-d') : 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round'}));
+  $('pip').replaceChildren(...out);
+}
+
+/* ---------- unlock celebration ---------- */
+const seenKey = 'upscore:seen-achievements';
+function celebrate(list) {
+  if (!list.length) return;
+  const a = list[0];
+  $('toast-t').textContent = a.title; $('toast-x').textContent = `Achievement unlocked · +${a.xp} XP`;
+  $('toast-ic').replaceChildren(S('use', {href: '#i-' + a.icon}));
+  $('toast').classList.add('show');
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const colors = ['--tang', '--gold', '--leaf', '--cran'];
+    for (let i = 0; i < 28; i++) {
+      const p = el('i', null, 'confetti'); p.style.background = `var(${colors[i % 4]})`;
+      p.style.setProperty('--x', (Math.random() * 380 - 190) + 'px'); p.style.setProperty('--y', (120 + Math.random() * 280) + 'px');
+      p.style.setProperty('--r', (Math.random() * 720 - 360) + 'deg');
+      document.body.append(p); setTimeout(() => p.remove(), 1200);
+    }
+  }
+  setTimeout(() => { $('toast').classList.remove('show'); setTimeout(() => celebrate(list.slice(1)), 500); }, 2600);
+}
+
+/* ---------- render ---------- */
+let firstLoad = true, last = null;
 async function refresh() {
   const r = await fetch('/api/summary', {headers: H});
   if (!r.ok) return;
-  const d = await r.json();
-  const u = d.utilization.overall;
-  $('util').textContent = pct(u); $('util').className = 'big ' + cls(u);
-  $('utilbar').style.width = Math.min(100, (u || 0) * 100) + '%';
-  $('utilbar').style.background = `var(--${cls(u) || 'line'})`;
-  if (u != null) $('utilnote').textContent = `${money(d.utilization.balance)} of ${money(d.utilization.limit)}. Aim for under 10%.`;
-  $('spend').textContent = money(d.spend_30d);
-  const cats = Object.entries(d.spend_by_category_30d).slice(0, 4).map(([k, v]) => `${k} ${money(v)}`).join(' · ');
-  $('spendnote').textContent = (d.income_30d ? `Income ${money(d.income_30d)} · ` : '') + cats;
-  if (d.profile && d.profile.credit_score) $('sub').textContent = `score ${d.profile.credit_score}` + (d.profile.goal ? ` → goal ${d.profile.goal}` : '');
-  if (d.inbox) $('sub').textContent += ` · forward receipts to ${d.inbox}`;
+  render(last = await r.json());
+}
+function render(d) {
+  const g = d.game, u = d.utilization, cards = d.accounts.filter(a => a.kind === 'credit');
 
-  const sc = d.scores || [], st = Object.values(d.streaks || {});
-  $('streak').textContent = '🔥 ' + (st.length ? Math.min(...st) : 0);
-  if (sc.length) {
-    const last = sc[sc.length - 1].score, first = sc[0].score;
-    $('score').textContent = last;
-    $('scoredelta').textContent = sc.length > 1 ? `${last >= first ? '+' : ''}${last - first} since ${sc[0].date}` : '';
-    drawChart(sc, parseInt((d.profile.goal || '').match(/\d{3}/)) || null);
-    $('chartnote').textContent = d.profile.goal ? `Goal: ${d.profile.goal}` : '';
-  } else if (d.profile.credit_score) $('score').textContent = d.profile.credit_score;
-  $('uncle').textContent = d.profile.persona === 'uncle' ? '🦃 Uncle Gary: ON' : '🦃 Uncle Gary mode';
+  $('s-flame').lastElementChild.textContent = g.daily_streak;
+  $('s-flame').classList.toggle('cold', !g.active_today);
+  $('s-flame').title = g.active_today ? `${g.daily_streak}-day streak. You checked in today.` : 'Message Pip today to keep your streak';
+  $('s-shield').textContent = g.ontime_months; $('s-xp').textContent = g.xp.toLocaleString(); $('s-lvl').textContent = 'Lv ' + g.level;
 
-  $('plan').replaceChildren(...d.plan.map(a => { const li = el('li', a.title); li.append(el('small', a.why)); return li; }));
-  $('accts').replaceChildren(...d.accounts.filter(a => a.kind === 'credit').map(a => row([
-    [a.name], [money(a.balance), 'n'], [pct(d.utilization.per_card[a.name]), 'n ' + cls(d.utilization.per_card[a.name])],
-    [a.next_due || '–'], [a.next_statement || '–']])));
-  const subs = d.subscriptions.map(s => row([[s.merchant], [s.category || ''], [money(s.monthly) + '/mo', 'n']]));
-  $('subs').replaceChildren(...(subs.length ? subs : [row([['None detected yet', 'mut']])]));
-  $('recent').replaceChildren(...d.recent.map(t => row([[t.date, 'mut'], [t.merchant], [t.kind === 'purchase' ? '' : t.kind, 'mut'],
-    [(t.kind === 'purchase' ? '-' : '+') + money(t.amount), 'n']])));
+  drawPip(g.stage, g.mood);
+  $('lvl-name').textContent = `Level ${g.level} · ${g.stage}`;
+  $('lvl-xp').textContent = `${g.xp_into} / ${g.xp_need} XP`;
+  $('xpbar').setAttribute('aria-valuenow', Math.round(100 * g.xp_into / g.xp_need));
+  requestAnimationFrame(() => $('xpbar').firstElementChild.style.transform = `scaleX(${g.xp_into / g.xp_need})`);
+
+  const actions = d.plan.filter(a => a.type !== 'keep_old'), q = actions[0];
+  if (!cards.length) {
+    $('bubble').textContent = "Hi, I'm Pip! Tell me about one credit card and I'll start growing.";
+    $('q-go').onclick = () => { $('q').value = 'My card: limit $, balance $, statement closes on the , due on the '; $('q').focus(); };
+  } else if (q) {
+    $('q-title').textContent = q.title; $('q-why').textContent = q.why;
+    const pay = q.amount && q.account;
+    $('q-go').textContent = pay ? 'I paid it' : 'Help me';
+    $('q-go').onclick = () => { $('q').value = pay ? `Paid ${money(q.amount)} on ${q.account}` : `Help me with: ${q.title}`; $('q').focus(); };
+    $('bubble').textContent = {happy: "We're growing! Keep the streak alive.", okay: "Not bad. Today's quest gets us closer.",
+                               worried: "My leaves are wilting. Today's quest is the fix."}[g.mood];
+  }
+  if (d.profile.persona === 'uncle') $('bubble').textContent = 'Uncle Gary pulled up a chair. Brace yourself.';
+  const side = actions.slice(1, 5).map(a => { const li = el('li'); li.append(el('i', null, 'dot'), el('span', a.title)); return li; });
+  $('side').replaceChildren(...(side.length ? side : [el('li', 'Nothing else today. Go enjoy some pie.', 'empty')]));
+
+  const goal = (d.profile.goal || '').match(/\b[3-8]\d\d\b/);
+  $('unit-title').textContent = goal ? `Road to ${goal[0]}` : 'Road to a better score';
+  $('unit-sub').textContent = `${g.unlocked} of ${g.achievements.length} achievements · Pip is a ${g.stage.toLowerCase()}`;
+  $('score').textContent = d.scores.length ? d.scores[d.scores.length - 1].score : (d.profile.credit_score || '–');
+
+  $('path').replaceChildren(...g.path.map((m, i) => {
+    const li = el('li', null, m.unlocked ? 'done' : m.current ? 'now' : 'locked');
+    li.style.animationDelay = firstLoad ? (i * 45) + 'ms' : '0ms';
+    const n = el('button', null, 'node'); n.type = 'button'; n.append(icon(m.unlocked || m.current ? m.icon : 'lock'));
+    n.setAttribute('aria-label', `${m.title}, ${m.unlocked ? 'done' : m.current ? 'next up' : 'locked'}`);
+    n.onclick = () => { $('q').value = m.unlocked ? `What did "${m.title}" do for my score?` : `How do I unlock "${m.title}"?`; $('q').focus(); };
+    const t = el('div', null, 'ntext'), b = el('b', m.title);
+    if (m.current) b.append(el('span', 'NEXT', 'tag'));
+    t.append(b, el('span', !m.unlocked && m.target > 1 ? `${m.desc} · ${m.progress}/${m.target}` : m.desc));
+    li.append(n, t); return li;
+  }));
+
+  $('ach-label').textContent = `Achievements · ${g.unlocked}/${g.achievements.length}`;
+  const sorted = [...g.achievements].sort((a, b) => (b.unlocked - a.unlocked) || (b.progress / b.target - a.progress / a.target));
+  $('badges').replaceChildren(...sorted.map(a => {
+    const b = el('div', null, 'badge' + (a.unlocked ? ' on' : '')); b.title = `${a.desc} · +${a.xp} XP`;
+    const h = el('div', null, 'hex'); h.append(icon(a.icon)); b.append(h, el('div', a.title));
+    if (!a.unlocked && a.target > 1) { const p = el('progress'); p.max = a.target; p.value = a.progress; b.append(p); }
+    return b;
+  }));
+
+  const band = v => v == null ? 'var(--lock-d)' : v < .1 ? 'var(--leaf)' : v <= .3 ? 'var(--gold)' : 'var(--cran)';
+  $('cards').replaceChildren(...(cards.length ? cards.map(a => {
+    const v = u.per_card[a.name], w = el('div', null, 'crd'), row = el('div', null, 'row');
+    row.append(el('div', a.name), el('span', `${money(a.balance)} · ${pct(v)}`));
+    const m = el('div', null, 'meter'), fill = el('i'); fill.style.width = Math.min(100, (v || 0) * 100) + '%'; fill.style.background = band(v); m.append(fill);
+    w.append(row, m, el('small', `Due ${fmtDate(a.next_due)} · statement closes ${fmtDate(a.next_statement)}`)); return w;
+  }) : [el('p', 'No cards yet. The 10% and 30% marks show up here once Pip knows one.', 'empty')]));
+
+  const subs = d.subscriptions, total = subs.reduce((s, x) => s + x.monthly, 0);
+  $('leaks-label').textContent = subs.length ? `Money leaks · ${money(total)}/mo` : 'Money leaks';
+  $('leaks').replaceChildren(...(subs.length ? subs.map(s => {
+    const li = el('li', s.merchant), b = el('button', 'Snip', 'ghost'); b.type = 'button';
+    b.onclick = () => { $('q').value = `Cancel ${s.merchant} for me`; $('q').focus(); };
+    li.append(el('span', money(s.monthly)), b); return li;
+  }) : [el('li', 'No recurring charges spotted yet.', 'empty')]));
+
+  drawChart(d.scores, goal ? +goal[0] : null);
+  $('recent').replaceChildren(...d.recent.map(t => { const li = el('li'); const out = t.kind === 'purchase';
+    li.append(el('span', fmtDate(t.date)), el('span', t.merchant), el('span', (out ? '−' : '+') + money(t.amount), out ? '' : 'in')); return li; }));
+
+  const seen = new Set(JSON.parse(localStorage.getItem(seenKey) || 'null') || []);
+  const hadSeen = localStorage.getItem(seenKey) !== null;
+  const fresh = g.achievements.filter(a => a.unlocked && !seen.has(a.id));
+  localStorage.setItem(seenKey, JSON.stringify(g.achievements.filter(a => a.unlocked).map(a => a.id)));
+  if (hadSeen) celebrate(fresh);  // very first visit just remembers what's already earned
+  firstLoad = false;
 }
 
 function drawChart(sc, goal) {
-  const svg = $('chart'), W = svg.clientWidth || 600, H = 150, P = 24, NS = 'http://www.w3.org/2000/svg';
+  const svg = $('chart'), W = svg.clientWidth || 300, H = 120, P = 8;
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  const ys = sc.map(s => s.score).concat(goal ? [goal] : []);
-  const lo = Math.min(...ys) - 15, hi = Math.max(...ys) + 15;
-  const x = i => P + (sc.length < 2 ? (W - 2 * P) / 2 : i * (W - 2 * P) / (sc.length - 1));
-  const y = v => H - P - (v - lo) / (hi - lo) * (H - 2 * P);
-  const mk = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+  if (!sc.length) { svg.replaceChildren(S('text', {x: 0, y: 20}, 'Tell Pip your score ("my score is 655") to chart it.')); return; }
+  const ys = sc.map(s => s.score).concat(goal ? [goal] : []), lo = Math.min(...ys) - 10, hi = Math.max(...ys) + 10;
+  const x = i => P + (sc.length < 2 ? (W - 2 * P) / 2 : i * (W - 2 * P) / (sc.length - 1)), y = v => H - 24 - (v - lo) / (hi - lo) * (H - 40);
   const kids = [];
-  if (goal) kids.push(mk('line', {x1: P, x2: W - P, y1: y(goal), y2: y(goal), stroke: 'var(--good)', 'stroke-dasharray': '4 4'}),
-                     mk('text', {x: W - P, y: y(goal) - 4, 'text-anchor': 'end'}, 'goal ' + goal));
-  kids.push(mk('polyline', {points: sc.map((s, i) => `${x(i)},${y(s.score)}`).join(' '), fill: 'none', stroke: 'var(--acc)', 'stroke-width': 2.5}));
-  sc.forEach((s, i) => { kids.push(mk('circle', {cx: x(i), cy: y(s.score), r: 3.5, fill: 'var(--acc)'}));
-    if (i === 0 || i === sc.length - 1) kids.push(mk('text', {x: x(i), y: H - 6, 'text-anchor': i ? 'end' : 'start'}, s.date)); });
+  if (goal) kids.push(S('line', {x1: 0, x2: W, y1: y(goal), y2: y(goal), stroke: css('--leaf'), 'stroke-width': 2, 'stroke-dasharray': '5 5'}),
+                     S('text', {x: W, y: y(goal) - 6, 'text-anchor': 'end'}, 'goal ' + goal));
+  kids.push(S('polyline', {points: sc.map((s, i) => `${x(i)},${y(s.score)}`).join(' '), fill: 'none', stroke: css('--tang'), 'stroke-width': 4, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}));
+  sc.forEach((s, i) => kids.push(S('circle', {cx: x(i), cy: y(s.score), r: i === sc.length - 1 ? 6 : 4, fill: css('--paper'), stroke: css('--tang-d'), 'stroke-width': 3})));
+  kids.push(S('text', {x: x(0), y: H - 4}, fmtDate(sc[0].date)), S('text', {x: x(sc.length - 1), y: H - 4, 'text-anchor': 'end'}, fmtDate(sc[sc.length - 1].date)));
   svg.replaceChildren(...kids);
 }
 
+/* ---------- chat ---------- */
+function say(text, who) { const m = el('div', text, 'msg ' + who); $('log').append(m); $('log').scrollTop = 1e9; return m; }
 async function send(text, files) {
   if (text) say(text, 'me'); files?.forEach(f => say('📎 ' + f.name, 'me'));
-  const wait = say('…', 'bot');
+  const wait = say('Pip is thinking…', 'bot');
   try {
     const r = await fetch('/api/chat', {method: 'POST', headers: {...H, 'Content-Type': 'application/json'}, body: JSON.stringify({text, files})});
-    const d = await r.json(); wait.textContent = d.reply || ('Error: ' + d.error);
-  } catch (err) { wait.textContent = 'Error: ' + err; }
+    const d = await r.json(); wait.textContent = d.reply || ("Pip couldn't do that: " + d.error);
+  } catch (err) { wait.textContent = "Couldn't reach Pip. Check your connection and try again."; }
   refresh();
 }
+$('f').onsubmit = e => { e.preventDefault(); const t = $('q').value.trim(); if (!t) return; $('q').value = ''; send(t); };
 $('file').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   const data = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(f); });
-  e.target.value = '';
-  send($('q').value.trim(), [{name: f.name, mime: f.type || 'application/octet-stream', data}]); $('q').value = '';
+  e.target.value = ''; const t = $('q').value.trim(); $('q').value = '';
+  send(t, [{name: f.name, mime: f.type || 'application/octet-stream', data}]);
 };
-$('sim').onclick = () => { $('q').value = 'What if I pay $500 on '; $('q').focus(); };
-$('uncle').onclick = () => send($('uncle').textContent.includes('ON') ? 'Turn off Uncle Gary mode' : 'Turn on Uncle Gary mode, then roast my spending');
 
-function say(text, who) { const m = el('div', text, 'msg ' + who); $('log').append(m); $('log').scrollTop = 1e9; return m; }
-$('f').onsubmit = e => { e.preventDefault(); const text = $('q').value.trim(); if (!text) return; $('q').value = ''; send(text); };
-refresh(); setInterval(refresh, 15000);
+refresh(); setInterval(refresh, 20000);
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => last && drawChart(last.scores, ((last.profile.goal || '').match(/\b[3-8]\d\d\b/) || [])[0] | 0 || null), 150); });
 </script>
 </body>
 </html>

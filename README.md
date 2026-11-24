@@ -14,6 +14,14 @@ web dashboard / CLI ──────────────┘   (Muse Ember 
 - **Statement-date aware.** It tells you what to pay *before the statement closes* so the card reports under 10%.
 - **Python standard library only.** There's nothing to `pip install`.
 
+### Gamified, so the habits stick
+- **Pip, your credit buddy.** Pip grows from **seed → sprout → sapling → bloom → mighty oak** as you level up. Its face follows your utilization: happy, okay or worried (wilting leaves and a sweat drop).
+- **XP and levels.** You earn XP for logging transactions, on-time payments, score check-ins, daily check-ins and achievements.
+- **Streaks.** 🔥 tracks days you've checked in, and 🛡 tracks months paid on time on every card.
+- **19 achievements** with progress bars, in tiers: Card on file → Bookkeeper → Ledger legend, On time → Clean quarter → Half-year hero → Perfect year, Under 30 → Single digits, Up ten/twenty-five/fifty, Goal crusher, Snip snip, Survived Uncle Gary.
+- **A milestone path** to your goal score, where the next milestone is highlighted.
+- **Unlock celebrations.** New achievements show up as a toast with confetti on the dashboard, and as a "🏆 Achievement unlocked" line in Slack, Telegram or email.
+
 ### Features
 - **Statements and receipts as images or PDFs.** Send a photo on Telegram or upload one on the dashboard. Muse Spark reads it and records the card and its transactions.
 - **What-if simulator.** "What if I pay $800 on Chase?" returns utilization before and after plus an estimated score range.

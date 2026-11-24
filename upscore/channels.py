@@ -7,7 +7,7 @@ import urllib.parse
 import urllib.request
 from datetime import date
 
-from . import agent, credit, db
+from . import agent, credit, db, gamify
 
 log = logging.getLogger("upscore")
 
@@ -195,6 +195,10 @@ def run_reminders_once(now=None):
     for key, text in credit.reminders(accounts, now.date(), txns=txns):
         if not db.kv_get("remind:" + key) and notify(text):
             db.kv_set("remind:" + key, 1)
+    with agent.TURN_LOCK:  # don't race an agent turn for the same unlocks
+        fresh = gamify.new_unlocks(accounts, txns, now.date())
+    if fresh:
+        notify(gamify.unlock_text(fresh))
     week = "checkin:%d-W%02d" % now.isocalendar()[:2]
     if now.weekday() == CHECKIN_WEEKDAY and now.hour >= CHECKIN_HOUR and not db.kv_get(week) and accounts:
         if notify(credit.checkin(accounts, txns, now.date(), db.sub_status())):

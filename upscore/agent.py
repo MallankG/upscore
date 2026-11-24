@@ -12,7 +12,7 @@ import threading
 import urllib.request
 from datetime import date
 
-from . import credit, db
+from . import credit, db, gamify
 
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.meta.ai/v1").rstrip("/")
 LLM_MODEL = os.environ.get("LLM_MODEL", "muse-spark-1.3")
@@ -211,6 +211,11 @@ def respond(chat, text, source, files=()):
                 except Exception as e:  # surface tool errors to the model so it can recover
                     out = {"error": str(e)}
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps(out, default=str)})
+        if source != "email":  # forwarded alerts aren't the user checking in
+            gamify.record_activity(upload=bool(files))
+        fresh = gamify.new_unlocks(*load())
+        if fresh:
+            reply += "\n\n" + gamify.unlock_text(fresh)
         db.run("INSERT INTO history(chat, role, content) VALUES(?,?,?)", (chat, "user", text[:4000]))
         db.run("INSERT INTO history(chat, role, content) VALUES(?,?,?)", (chat, "assistant", reply))
         return reply

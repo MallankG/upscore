@@ -39,6 +39,7 @@ No bank credentials. No screen scraping. The connector keeps the API keys out of
 | F11 | Subscription cancel helper | An AgentMail draft is created, then sent only after the user explicitly confirms; the subscription is then marked cancelled |
 | F12 | Uncle Gary mode | A persona toggle: the Thanksgiving uncle roasts your spending, with the same numbers and plan (aimed at the Weird Uncle Award) |
 | F13 | Score history | Each reported score is logged and charted against the goal |
+| F14 | Gamification | Pip the mascot grows through 5 stages by level and its mood tracks utilization. Includes XP and levels, a daily check-in streak, an on-time streak, 19 achievements with thresholds, a milestone path to the goal score, and unlock toasts in the dashboard and chat. Everything is recomputed from data in `gamify.py`. |
 
 ## Credit engine rules (deterministic)
 These are based on FICO factor weights: payment history 35%, amounts owed 30%, length of history 15%, new credit 10%, credit mix 10%.

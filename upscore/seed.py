@@ -27,4 +27,7 @@ for days, score in [(150, 598), (120, 611), (90, 619), (60, 628), (30, 636), (0,
     db.log_score(score, d(days))
 db.kv_set("profile:credit_score", "642")
 db.kv_set("profile:goal", "720 by June")
+for n in range(1, 6):  # a 5-day check-in streak that's still alive (today not done yet)
+    db.kv_set("day:" + d(n), 1)
+db.kv_set("count:uploads", 1)
 print("seeded", db.DB_PATH)

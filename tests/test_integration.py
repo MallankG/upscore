@@ -178,7 +178,8 @@ class IntegrationTest(unittest.TestCase):
         self.assertEqual(self.agent.respond("web", "cancel netflix", "web"), "Draft ready. Send it?")
         self.assertEqual(self.posts("/drafts")[0]["to"], ["help@netflix.com"])
         self.assertFalse(self.posts("/send"))  # nothing sent without confirmation
-        self.assertEqual(self.agent.respond("web", "yes send it", "web"), "Sent.")
+        self.assertEqual(self.agent.respond("web", "yes send it", "web"),
+                         "Sent.\n\n🏆 Achievement unlocked: Snip snip (+60 XP)")
         self.assertTrue(self.posts("/drafts/d1/send"))
         subs = self.agent.call_tool("get_summary", {}, "web")["subscriptions"]
         self.assertNotIn("Netflix", [x["merchant"] for x in subs])
@@ -214,7 +215,9 @@ class IntegrationTest(unittest.TestCase):
         try:
             pdf = {"name": "stmt.pdf", "mime": "application/pdf", "data": base64.b64encode(b"%PDF-1.4 fake").decode()}
             req = urllib.request.Request(url, data=json.dumps({"files": [pdf]}).encode(), method="POST")
-            self.assertEqual(json.load(urllib.request.urlopen(req))["reply"], "Logged it.")
+            reply = json.load(urllib.request.urlopen(req))["reply"]
+            self.assertTrue(reply.startswith("Logged it."))
+            self.assertIn("Paper trail", reply)  # first statement upload unlocks the achievement
             part = self.posts("/chat/completions")[0]["messages"][-1]["content"][1]
             self.assertEqual(part["file"]["filename"], "stmt.pdf")
             bad = {"name": "x.zip", "mime": "application/zip", "data": "AAAA"}
