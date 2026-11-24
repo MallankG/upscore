@@ -228,7 +228,8 @@ def respond(chat, text, source, files=()):
             messages.append({k: v for k, v in msg.items() if k in ("role", "content", "tool_calls")})
             calls = msg.get("tool_calls") or []
             if not calls:
-                reply = (msg.get("content") or "").strip() or "Done."
+                # plain text for chat apps: small models add markdown bold even when told not to
+                reply = (msg.get("content") or "").replace("**", "").strip() or "Done."
                 break
             for c in calls:
                 try:
