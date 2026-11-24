@@ -9,6 +9,7 @@ import base64
 import json
 import os
 import threading
+import urllib.error
 import urllib.request
 from datetime import date
 
@@ -29,9 +30,13 @@ def http_json(method, url, body=None, headers=None, timeout=90):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
                                  headers={"Content-Type": "application/json", **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        raw = r.read()
-        return json.loads(raw) if raw else {}
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:  # keep the provider's explanation (e.g. Meta billing, AgentMail permission)
+        detail = e.read()[:500].decode(errors="replace")
+        raise RuntimeError(f"{e.code} from {url.split('?')[0]}: {detail}") from None
 
 
 SYSTEM = """You are Upscore, a friendly, concise personal credit coach agent.
