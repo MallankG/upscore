@@ -30,4 +30,12 @@ db.kv_set("profile:goal", "720 by June")
 for n in range(1, 6):  # a 5-day check-in streak that's still alive (today not done yet)
     db.kv_set("day:" + d(n), 1)
 db.kv_set("count:uploads", 1)
+q_end = date(date.today().year, ((date.today().month - 1) // 3 + 1) * 3, 1)  # this quarter's rotating window
+q_end = (q_end.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+q_start = date(q_end.year, q_end.month - 2, 1)
+for card, cat, rate, start, end in [("Chase Freedom", "everything", 1, None, None),
+                                    ("Chase Freedom", "gas", 5, q_start, q_end), ("Chase Freedom", "online shopping", 5, q_start, q_end),
+                                    ("Amex Blue", "everything", 1, None, None), ("Amex Blue", "groceries", 3, None, None),
+                                    ("Amex Blue", "streaming", 3, None, None), ("Amex Blue", "dining", 2, None, None)]:
+    db.set_reward(card, cat, rate, start and start.isoformat(), end and end.isoformat())
 print("seeded", db.DB_PATH)

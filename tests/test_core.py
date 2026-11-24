@@ -109,6 +109,42 @@ class GamifyTest(unittest.TestCase):
         self.assertIn(st["stage"], [n for _, n in gamify.STAGES])
 
 
+class RewardsTest(unittest.TestCase):
+    def setUp(self):
+        from upscore import rewards
+        self.r = rewards
+        self.cards = [card(name="Freedom", balance=100), card(name="Amex Gold", credit_limit=5000, balance=0),
+                      card(name="Maxed", credit_limit=1000, balance=280)]
+        self.rules = [dict(card="Freedom", category="everything", rate=1.5, start=None, end=None, cap=None),
+                      dict(card="Freedom", category="gas", rate=5, start="2026-10-01", end="2026-12-31", cap=1500),
+                      dict(card="Amex Gold", category="dining", rate=4, start=None, end=None, cap=None),
+                      dict(card="Amex Gold", category="groceries", rate=4, start=None, end=None, cap=None),
+                      dict(card="Maxed", category="groceries", rate=6, start=None, end=None, cap=None)]
+
+    def test_normalize(self):
+        self.assertEqual([self.r.normalize(c) for c in ("Restaurants", "Gas Stations", "amazon.com", "coffee", "")],
+                         ["dining", "gas", "online shopping", "dining", "other"])
+
+    def test_rotating_category_only_in_window(self):
+        self.assertEqual(self.r.best_card("gas", self.cards, self.rules, T)["pick"]["card"], "Freedom")
+        jan = self.r.best_card("gas", self.cards, self.rules, date(2027, 1, 5))["pick"]
+        self.assertEqual((jan["card"], jan["rate"]), ("Freedom", 1.5))  # back to base rate
+
+    def test_utilization_guard_beats_higher_rate(self):
+        b = self.r.best_card("groceries", self.cards, self.rules, T, amount=100)
+        self.assertEqual(b["ranked"][0]["card"], "Maxed")  # 6% but would hit 38%
+        self.assertEqual(b["pick"]["card"], "Amex Gold")
+        self.assertIn("utilization", b["note"])
+
+    def test_missed_rewards_tip(self):
+        t = dict(kind="purchase", account="Freedom", category="dining", amount=80, date=T.isoformat())
+        m = self.r.missed(t, self.cards, self.rules)
+        self.assertEqual((m["better_card"], m["extra"]), ("Amex Gold", 2.0))  # (4% - 1.5%) of $80
+        self.assertIsNone(self.r.missed({**t, "account": "Amex Gold"}, self.cards, self.rules))
+        sheet = {x["category"]: x["card"] for x in self.r.cheat_sheet(self.cards, self.rules, T)}
+        self.assertEqual((sheet["dining"], sheet["gas"]), ("Amex Gold", "Freedom"))
+
+
 class ProviderTest(unittest.TestCase):
     def test_provider_flag_presets_and_overrides(self):
         import importlib

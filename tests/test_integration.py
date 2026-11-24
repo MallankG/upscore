@@ -57,6 +57,15 @@ class Mock(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(b)))
             self.end_headers()
             return self.wfile.write(b)
+        if self.path.startswith("/banking/accounts"):
+            return self.reply({"accounts": [{"id": "a1", "name": "Era Visa", "type": "credit_card",
+                                             "currentBalance": -300.0, "creditLimit": 3000}]})
+        if self.path.startswith("/banking/transactions"):
+            return self.reply({"transactions": [
+                {"id": "x1", "accountId": "a1", "amount": -25.5, "merchantName": "Blue Bottle",
+                 "category": {"name": "Coffee"}, "transactionDate": "2026-11-20"},
+                {"id": "x2", "accountId": "a1", "amount": -9.0, "merchantName": "Pending Co", "pending": True,
+                 "transactionDate": "2026-11-21"}], "pagination": {"totalPages": 1}})
         if "conversations.history" in self.path:
             return self.reply({"ok": True, "messages": [
                 {"ts": "1795000002.000200", "bot_id": "B1", "text": "earlier bot reply"},
@@ -68,10 +77,36 @@ class Mock(BaseHTTPRequestHandler):
         if "/v1/listen" in self.path:  # Deepgram: raw audio in, transcript out
             CALLS.append(("POST", self.path, {"content_type": self.headers["Content-Type"], "bytes": len(raw)}))
             return self.reply({"results": {"channels": [{"alternatives": [{"transcript": "spent twenty dollars on tacos"}]}]}})
+        ctype = self.headers.get("Content-Type", "")
+        if "/v1/speak" in self.path:
+            CALLS.append(("POST", self.path, json.loads(raw)))
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.send_header("Content-Length", "4")
+            self.end_headers()
+            return self.wfile.write(b"ID3x")
+        if "x-www-form-urlencoded" in ctype or "ndjson" in ctype or "multipart" in ctype:
+            from urllib.parse import parse_qs
+            parsed = ({k: v[0] for k, v in parse_qs(raw.decode()).items()} if "urlencoded" in ctype
+                      else {"raw": raw.decode(errors="replace")})
+            CALLS.append(("POST", self.path, parsed))
+            if self.path.endswith("/files/content"):
+                return self.reply({"entries": [{"id": "file1"}]})
+            return self.reply({"status": 1})
         body = json.loads(raw or b"{}")
         CALLS.append(("POST", self.path, body))
         if self.path.endswith("/chat/completions"):
             return self.reply({"choices": [{"message": fake_llm(body)}]})
+        if self.path.endswith("/v1/systemone"):
+            st = body["state"]
+            cat = "streaming" if "Netflix" in st else "groceries" if "Whole Foods" in st else "dining"
+            return self.reply({"answers": {"category": {"type": "choice", "choice": cat, "confidence": 0.93}}})
+        if self.path.endswith("/records/namespaces/txns/search"):
+            return self.reply({"result": {"hits": [{"_id": "t1", "_score": 0.91, "fields": {"text": "Blue Bottle coffee", "amount": 25.5}}]}})
+        if self.path == "/search":  # Tavily
+            return self.reply({"answer": "Q4 2026: 5% on gas and EV charging", "results": [{"title": "Freedom Q4", "url": "https://x", "content": "5% gas"}]})
+        if self.path.endswith("/2.0/folders"):
+            return self.reply({"id": "f1"})
         if self.path.endswith("/getFile"):
             return self.reply({"ok": True, "result": {"file_path": "photos/p.jpg"}})
         if self.path.endswith("/drafts"):
@@ -93,13 +128,16 @@ class IntegrationTest(unittest.TestCase):
         base = f"http://127.0.0.1:{cls.srv.server_port}"
         os.environ.update(LLM_BASE_URL=base, AGENTMAIL_BASE_URL=base, AGENTMAIL_INBOX="up@agentmail.to",
                           OWNER_EMAILS="me@ex.com", SLACK_BASE_URL=base, SLACK_CHANNEL="D1",
-                          TELEGRAM_BOT_TOKEN="x", TELEGRAM_API_BASE=base, DEEPGRAM_BASE_URL=base)
+                          TELEGRAM_BOT_TOKEN="x", TELEGRAM_API_BASE=base, DEEPGRAM_BASE_URL=base,
+                          ERA_BASE_URL=base, PUSHOVER_BASE_URL=base, PUSHOVER_USER="u123", TAVILY_BASE_URL=base,
+                          PINECONE_BASE_URL=base, TYPESAFE_BASE_URL=base, BOX_BASE_URL=base)
         import importlib
-        from upscore import agent, channels, db, voice
+        from upscore import agent, channels, db, integrations, voice
         importlib.reload(voice)
         importlib.reload(agent)
+        importlib.reload(integrations)
         importlib.reload(channels)
-        cls.agent, cls.channels, cls.db = agent, channels, db
+        cls.agent, cls.channels, cls.db, cls.integ = agent, channels, db, integrations
 
     @classmethod
     def tearDownClass(cls):
@@ -263,6 +301,44 @@ class IntegrationTest(unittest.TestCase):
             self.assertIn("Deepgram", str(e.exception))
         finally:
             self.agent.voice.DEEPGRAM_BASE = os.environ["DEEPGRAM_BASE_URL"]
+
+
+    def test_13_era_sync_imports_bank_data(self):
+        out = self.agent.call_tool("sync_bank", {}, "web")
+        self.assertEqual(out, {"accounts": 1, "new_transactions": 1})  # pending one skipped
+        acct = self.db.q("SELECT * FROM accounts WHERE name='Era Visa'")[0]
+        self.assertEqual((acct["kind"], acct["balance"], acct["credit_limit"]), ("credit", 300.0, 3000.0))
+        t = self.db.q("SELECT * FROM txns WHERE merchant='Blue Bottle'")[0]
+        self.assertEqual((t["kind"], t["amount"], t["category"], t["account"], t["source"]),
+                         ("purchase", 25.5, "dining", "Era Visa", "era"))
+        self.assertEqual(self.integ.era_sync()["new_transactions"], 0)  # idempotent
+
+    def test_14_typesafe_category_and_reward_tip(self):
+        self.db.upsert_account("Gold", credit_limit=5000, balance=0)
+        self.agent.call_tool("set_card_reward", {"card": "Gold", "category": "Restaurants", "rate": 4}, "web")
+        out = self.agent.call_tool("add_transaction", {"amount": 50, "merchant": "Shake Shack", "kind": "purchase",
+                                                       "account": "Chase Freedom", "category": "food"}, "web")
+        self.assertEqual(out["category"], "dining")  # Jev's choice wins over the model's guess
+        self.assertEqual(out["tip"]["better_card"], "Gold")
+        self.assertEqual(out["tip"]["extra"], 1.5)  # (4% - default 1%) of $50
+        best = self.agent.call_tool("best_card", {"category": "restaurants"}, "web")
+        self.assertEqual(best["pick"]["card"], "Gold")
+
+    def test_15_pushover_web_search_pinecone_box_tts(self):
+        self.assertTrue(self.integ.push("Upscore", "Chase due Friday"))
+        self.assertEqual(self.posts("/1/messages.json")[0], {"user": "u123", "title": "Upscore", "message": "Chase due Friday"})
+        self.assertIn("5% on gas", self.agent.call_tool("web_search", {"query": "freedom q4"}, "web")["answer"])
+        n = self.integ.pinecone_index_new()
+        self.assertGreater(n, 0)
+        up = self.posts("/indexes/upscore/records/namespaces/txns/upsert")[0]["raw"].splitlines()
+        self.assertEqual(len(up), n)
+        self.assertIn("text", json.loads(up[0]))
+        self.assertEqual(self.integ.pinecone_index_new(), 0)  # nothing new
+        self.assertEqual(self.agent.call_tool("search_history", {"query": "coffee"}, "web")["matches"][0]["amount"], 25.5)
+        self.assertEqual(self.integ.box_archive("stmt.pdf", "application/pdf", b"%PDF"), "file1")
+        self.assertIn('"parent": {"id": "f1"}', self.posts("/2.0/files/content")[0]["raw"])
+        from upscore import voice
+        self.assertEqual(voice.speak("hello"), ("audio/mpeg", b"ID3x"))
 
 
 if __name__ == "__main__":

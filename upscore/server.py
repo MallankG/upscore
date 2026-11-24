@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import agent, channels, credit, db, gamify
+from . import agent, channels, connectors, credit, db, gamify, rewards, voice
 
 PORT = int(os.environ.get("PORT", "8080"))
 WEB_TOKEN = os.environ.get("WEB_TOKEN", "")  # set this if the Sprite URL is public: it guards your financial data
@@ -44,14 +44,26 @@ class Handler(BaseHTTPRequestHandler):
             out = {**credit.summary(accounts, txns, status=db.sub_status()), "profile": agent.profile(),
                    "recent": txns[:15], "inbox": channels.INBOX or None,
                    "scores": db.q("SELECT date, score FROM scores ORDER BY date"),
-                   "game": gamify.state(accounts, txns)}
+                   "game": gamify.state(accounts, txns),
+                   "cards_where": rewards.cheat_sheet(accounts, db.reward_rules()),
+                   "connectors": connectors.status()}
             return self.send(200, json.dumps(out, default=str))
         self.send(404, "not found", "text/plain")
 
     def do_POST(self):
         if not self.authed():
             return self.send(401, "unauthorized", "text/plain")
-        if urlparse(self.path).path != "/api/chat":
+        path = urlparse(self.path).path
+        if path == "/api/tts":  # Pip's voice through the Deepgram connector
+            n = int(self.headers.get("Content-Length", 0))
+            text = (json.loads(self.rfile.read(min(n, 20_000)) or b"{}").get("text") or "").strip()
+            try:
+                out = voice.speak(text) if text else None
+            except Exception:
+                logging.exception("tts failed")
+                out = None
+            return self.send(200, out[1], out[0]) if out else self.send(204, b"", "text/plain")
+        if path != "/api/chat":
             return self.send(404, "not found", "text/plain")
         n = int(self.headers.get("Content-Length", 0))
         if n > 15_000_000:  # base64 of a 10 MB file

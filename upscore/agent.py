@@ -14,10 +14,10 @@ import urllib.error
 import urllib.request
 from datetime import date
 
-from . import credit, db, gamify, voice
+from . import connectors, credit, db, gamify, rewards, voice
 
 PROVIDERS = {
-    "meta": {"base": os.environ.get("META_BASE_URL", "https://api.meta.ai/v1"),
+    "meta": {"base": os.environ.get("META_BASE_URL") or (connectors.base("meta") + "/v1" if connectors.base("meta") else "https://api.meta.ai/v1"),
              "model": "muse-spark-1.3", "fast": "muse-ember-1.0", "effort": "low"},  # Muse defaults to high/max: slow
     "ollama": {"base": os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
                "model": "qwen3.5:4b", "fast": "qwen3.5:4b", "effort": "none"},     # no thinking: CPU is slow
@@ -63,6 +63,11 @@ Rules:
   account fact it contains and record it. Card payment confirmations are kind=payment. Paychecks/deposits are
   kind=income. Mark subscriptions/renewals recurring=true. Use the card/account name if mentioned (e.g. "Chase Freedom").
   If an email has nothing financial, do nothing.
+- Rewards: when the user asks which card to use (or is about to buy something), call best_card. When they add a
+  card or ask about rotating/quarterly categories, look the card up with web_search ("<card> rewards categories
+  <current quarter and year>") and store what you find with set_card_reward (rate = % cash back; rotating offers
+  get start/end dates). If add_transaction returns a "tip", tell the user in one line which card to use next time.
+- For questions about past spending ("how much on coffee since September?") use search_history when available.
 - NEVER invent numbers. For plans, utilization, dues or subscriptions call get_plan/get_summary and quote them.
 - Plans: lead with the 1-3 highest-impact actions, each with an amount and a date. Explain the "why" in one line.
 - Warn against closing old cards, opening many new cards, or paying only after the statement date when utilization is high.
@@ -131,6 +136,25 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"merchant": {"type": "string"},
                                                      "status": {"type": "string", "enum": ["cancelled", "active"]}},
                     "required": ["merchant", "status"]}},
+    {"name": "best_card", "description": "Which credit card to use for a purchase category (and optional amount), "
+                                         "using stored reward rules incl. rotating categories and utilization.",
+     "parameters": {"type": "object", "properties": {"category": {"type": "string"}, "amount": {"type": "number"}},
+                    "required": ["category"]}},
+    {"name": "set_card_reward", "description": "Store a card's reward rate for a category. category is one of "
+                                              + ", ".join(rewards.CATEGORIES) + " or 'everything' (base rate).",
+     "parameters": {"type": "object", "properties": {
+         "card": {"type": "string"}, "category": {"type": "string"},
+         "rate": {"type": "number", "description": "% cash back (points x cents per point), e.g. 5 for 5x/5%"},
+         "start": {"type": "string", "description": "YYYY-MM-DD, for rotating offers"},
+         "end": {"type": "string", "description": "YYYY-MM-DD, for rotating offers"},
+         "cap": {"type": "number", "description": "Quarterly/annual spend cap in $, if any"}, "note": {"type": "string"}},
+         "required": ["card", "category", "rate"]}},
+    {"name": "web_search", "description": "Search the web (card reward categories, merchant cancellation steps).",
+     "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "search_history", "description": "Semantic search over all past transactions.",
+     "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "sync_bank", "description": "Pull the latest balances and transactions from linked bank accounts (Era).",
+     "parameters": {"type": "object", "properties": {}}},
     {"name": "recent_transactions", "description": "List recent transactions.",
      "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
 ]
@@ -146,8 +170,29 @@ def profile():
 
 def call_tool(name, args, source):
     if name == "add_transaction":
-        return db.add_txn(args["amount"], args["merchant"], args.get("kind", "purchase"), args.get("date"),
-                          args.get("category"), args.get("account"), args.get("recurring", False), source, args.get("note"))
+        from . import integrations
+        cat = args.get("category")
+        if args.get("kind", "purchase") == "purchase":
+            try:
+                cat = integrations.categorize(args["merchant"], args.get("note")) or rewards.normalize(cat)
+            except Exception:  # Jev is a nice-to-have; never block logging on it
+                cat = rewards.normalize(cat)
+        out = db.add_txn(args["amount"], args["merchant"], args.get("kind", "purchase"), args.get("date"),
+                         cat, args.get("account"), args.get("recurring", False), source, args.get("note"))
+        tip = rewards.missed({**args, "kind": args.get("kind", "purchase"), "category": cat,
+                              "date": args.get("date") or date.today().isoformat()}, load()[0], db.reward_rules())
+        return {**out, "category": cat, **({"tip": tip} if tip else {})}
+    if name == "best_card":
+        return rewards.best_card(args["category"], load()[0], db.reward_rules(), amount=float(args.get("amount") or 0))
+    if name == "set_card_reward":
+        db.set_reward(args["card"], rewards.normalize(args["category"]), args["rate"], args.get("start"),
+                      args.get("end"), args.get("cap"), args.get("note"))
+        return {"ok": True, "category": rewards.normalize(args["category"])}
+    if name in ("web_search", "search_history", "sync_bank"):
+        from . import integrations
+        return {"web_search": lambda: integrations.web_search(args["query"]),
+                "search_history": lambda: integrations.search_history(args["query"]),
+                "sync_bank": integrations.era_sync}[name]()
     if name == "upsert_account":
         return db.upsert_account(**{k: v for k, v in args.items() if k in db.upsert_account.__code__.co_varnames})
     if name == "set_profile":
@@ -191,6 +236,15 @@ def llm(messages, model=None):
 MAX_FILE_BYTES = 10_000_000
 
 
+def _archive(name, mime, data):
+    from . import integrations
+    try:
+        integrations.box_archive(name, mime, data)
+    except Exception:
+        import logging
+        logging.exception("box archive failed")
+
+
 def user_content(text, files):
     """Chat Completions content parts: images as image_url, PDFs as file parts (both base64 data URLs)."""
     if not files:
@@ -213,6 +267,9 @@ def respond(chat, text, source, files=()):
     """One agent turn. `chat` keys conversation history (e.g. 'telegram', 'email', 'web').
     `files` is a list of (name, mime, bytes): images/PDFs go to the model, audio is transcribed first."""
     heard = [voice.transcribe(m, d) for _, m, d in files if m.startswith("audio/")]  # outside the lock: network
+    for f in files:
+        if not f[1].startswith("audio/"):
+            threading.Thread(target=_archive, args=f, daemon=True).start()
     files = [f for f in files if not f[1].startswith("audio/")]
     if heard:
         text = " ".join([text, *heard]).strip()

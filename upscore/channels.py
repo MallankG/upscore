@@ -8,12 +8,12 @@ import urllib.parse
 import urllib.request
 from datetime import date
 
-from . import agent, credit, db, gamify
+from . import agent, connectors, credit, db, gamify, integrations
 
 log = logging.getLogger("upscore")
 
 # AgentMail through the Sprites gateway, e.g. https://api.sprites.dev/v1/gateway/agentmail/<connection_id>
-AGENTMAIL_BASE = os.environ.get("AGENTMAIL_BASE_URL", "").rstrip("/")
+AGENTMAIL_BASE = connectors.base("agentmail")
 AGENTMAIL_KEY = os.environ.get("AGENTMAIL_API_KEY", "")  # local dev only; on a Sprite the connector injects it
 INBOX = os.environ.get("AGENTMAIL_INBOX", "")              # e.g. upscore@agentmail.to
 OWNER_EMAILS = {e.strip().lower() for e in os.environ.get("OWNER_EMAILS", "").split(",") if e.strip()}
@@ -24,7 +24,7 @@ TG_BASE = os.environ.get("TELEGRAM_API_BASE", f"https://api.telegram.org/bot{TG_
 EMAIL_POLL_SECS = int(os.environ.get("EMAIL_POLL_SECS", "60"))
 
 # Slack (Bot) connector, e.g. https://api.sprites.dev/v1/gateway/slack/<connection_id>  (direct: https://slack.com/api)
-SLACK_BASE = os.environ.get("SLACK_BASE_URL", "").rstrip("/")
+SLACK_BASE = connectors.base("slack_bot")
 SLACK_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")    # local dev only; on a Sprite the connector injects it
 SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "")    # channel or DM id the bot watches, e.g. C0123 / D0456
 SLACK_POLL_SECS = int(os.environ.get("SLACK_POLL_SECS", "5"))
@@ -180,7 +180,8 @@ def poll_slack_once():
 
 def notify(text):
     sent = False
-    for fn in (send_telegram, send_slack, lambda t: send_email("Upscore reminder", t)):
+    for fn in (send_telegram, send_slack, lambda t: integrations.push("Upscore", t),
+               lambda t: send_email("Upscore reminder", t)):
         try:
             sent = bool(fn(text)) or sent
         except Exception:
@@ -268,6 +269,10 @@ def enabled():
     if SLACK_BASE and SLACK_CHANNEL:
         out.append((poll_slack_once, SLACK_POLL_SECS, "slack"))
     out.append((run_reminders_once, 900, "reminders"))
+    if connectors.base("era"):
+        out.append((integrations.era_sync, 1800, "era"))
+    if connectors.base("pinecone"):
+        out.append((integrations.pinecone_index_new, 120, "pinecone"))
     if os.path.exists(SPRITE_SOCK) and os.environ.get("KEEP_AWAKE", "1") == "1":
         out.append((keepalive_once, 60, "keepalive"))
     return out

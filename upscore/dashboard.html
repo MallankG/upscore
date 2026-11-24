@@ -134,6 +134,14 @@ details summary { cursor: pointer; list-style: none; margin: 0 } details summary
 .act li { display: flex; gap: 10px } .act li span:first-child { color: var(--ink-3); width: 48px }
 .act li span:last-child { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 700 }
 .act .in { color: var(--leaf-d) }
+.where { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px }
+.where li { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: baseline; font-weight: 600 }
+.where li span { color: var(--ink-2); font-weight: 500; font-size: 14px }
+.where li b { font: 700 15px var(--display); color: var(--leaf-d); font-variant-numeric: tabular-nums }
+.where .rot { font: 700 10px/1 var(--display); letter-spacing: .06em; color: var(--tang-d); background: var(--tang-l); padding: 3px 6px; border-radius: 6px; margin-left: 6px }
+.chips { display: flex; flex-wrap: wrap; gap: 6px }
+.chip { font: 600 12px/1 var(--body); padding: 6px 9px; border-radius: 99px; background: var(--lock); color: var(--ink-3) }
+.chip.on { background: var(--leaf); color: var(--paper) }
 .empty { color: var(--ink-2); font-size: 14px; margin: 0; font-weight: 500 }
 
 /* composer + chat */
@@ -231,10 +239,12 @@ details summary { cursor: pointer; list-style: none; margin: 0 } details summary
 
   <aside class="right">
     <section><p class="label" id="ach-label">Achievements</p><div class="badges" id="badges"></div></section>
+    <section><p class="label">Which card where</p><ul class="where" id="where"></ul></section>
     <section><p class="label">Card health</p><div class="cards" id="cards"></div></section>
     <section><p class="label" id="leaks-label">Money leaks</p><ul class="leaks" id="leaks"></ul></section>
     <section><p class="label">Score history</p><svg id="chart" role="img" aria-label="Credit score history"></svg></section>
     <details><summary class="label">Recent activity ▾</summary><ul class="act" id="recent"></ul></details>
+    <section><p class="label">Connected</p><div class="chips" id="chips"></div></section>
   </aside>
 </main>
 
@@ -408,6 +418,19 @@ function render(d) {
     li.append(el('span', money(s.monthly)), b); return li;
   }) : [el('li', 'No recurring charges spotted yet.', 'empty')]));
 
+  const where = d.cards_where || [];
+  const hasRules = where.some(w => w.rate !== 1);
+  $('where').replaceChildren(...(hasRules ? where.filter(w => w.rate > 1 || w.paused).map(w => {
+    const li = el('li'), name = el('div', w.category[0].toUpperCase() + w.category.slice(1));
+    if (w.rotating) name.append(el('span', 'UNTIL ' + fmtDate(w.ends).toUpperCase(), 'rot'));
+    li.append(name, el('span', w.card), el('b', w.rate + '%'));
+    if (w.paused) { const p = el('small', `${w.paused.card} pays ${w.paused.rate}% but it's at ${pct(w.paused.util)}. Pay it down first.`, 'empty');
+      p.style.gridColumn = '1 / -1'; li.append(p); }
+    return li;
+  }) : [el('li', cards.length ? 'Ask Pip "which card for groceries?" and it\'ll look up your cards\' rewards.' : 'Add a card to see where it earns most.', 'empty')]));
+  const labels = {meta: 'Meta Muse', agentmail: 'AgentMail', slack_bot: 'Slack', deepgram: 'Deepgram voice', era: 'Era bank data',
+                  pushover: 'Pushover', tavily: 'Tavily', exa: 'Exa', pinecone: 'Pinecone memory', typesafe: 'TypeSafe Jev', box: 'Box'};
+  $('chips').replaceChildren(...Object.entries(d.connectors || {}).map(([k, on]) => { const c = el('span', labels[k] || k, 'chip' + (on ? ' on' : '')); c.title = on ? 'Connected' : 'Not connected yet'; return c; }));
   drawChart(d.scores, goal ? +goal[0] : null);
   $('recent').replaceChildren(...d.recent.map(t => { const li = el('li'); const out = t.kind === 'purchase';
     li.append(el('span', fmtDate(t.date)), el('span', t.merchant), el('span', (out ? '−' : '+') + money(t.amount), out ? '' : 'in')); return li; }));
@@ -439,11 +462,17 @@ function drawChart(sc, goal) {
 function say(text, who) { const m = el('div', text, 'msg ' + who); $('log').append(m); $('log').scrollTop = 1e9; return m; }
 let spoken = localStorage.getItem('upscore:speak') === '1', viaVoice = false;
 $('spk').setAttribute('aria-pressed', spoken);
-$('spk').onclick = () => { spoken = !spoken; localStorage.setItem('upscore:speak', spoken ? '1' : '0'); $('spk').setAttribute('aria-pressed', spoken); if (!spoken) speechSynthesis.cancel(); };
-function speak(text) {
+$('spk').onclick = () => { spoken = !spoken; localStorage.setItem('upscore:speak', spoken ? '1' : '0'); $('spk').setAttribute('aria-pressed', spoken); if (!spoken) { speechSynthesis?.cancel(); pipAudio?.pause(); } };
+let pipAudio = null;
+async function speak(text) {
+  const clean = text.replace(/[🎙🏆“”]/gu, '').replace(/\s+/g, ' ').slice(0, 1500);
+  try {  // Pip's own voice through the Deepgram connector
+    const r = await fetch('/api/tts', {method: 'POST', headers: {...H, 'Content-Type': 'application/json'}, body: JSON.stringify({text: clean})});
+    if (r.status === 200) { pipAudio?.pause(); pipAudio = new Audio(URL.createObjectURL(await r.blob())); pipAudio.play(); return; }
+  } catch (e) { /* fall through to the browser voice */ }
   if (!('speechSynthesis' in window)) return;
   speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text.replace(/[🎙🏆“”]/gu, '').replace(/\s+/g, ' ').slice(0, 600));
+  const u = new SpeechSynthesisUtterance(clean.slice(0, 600));
   u.rate = 1.05; u.pitch = 1.15; speechSynthesis.speak(u);
 }
 
@@ -452,6 +481,7 @@ let recorder = null;
 function micLive(on) { $('mic').classList.toggle('live', on); $('mic').title = on ? 'Listening… tap to send' : 'Talk to Pip'; }
 $('mic').onclick = async () => {
   if ('speechSynthesis' in window) speechSynthesis.cancel();
+  pipAudio?.pause();
   if (recorder) { recorder.stop(); return; }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({audio: true});

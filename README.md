@@ -22,6 +22,29 @@ web dashboard / CLI ──────────────┘   (Muse Ember 
 - **A milestone path** to your goal score, where the next milestone is highlighted.
 - **Unlock celebrations.** New achievements show up as a toast with confetti on the dashboard, and as a "🏆 Achievement unlocked" line in Slack, Telegram or email.
 
+### Which card where (rewards optimizer)
+Pip knows each card's reward rates, including **rotating quarterly categories** such as 5% on gas this quarter. It looks them up with web search and stores them with start and end dates.
+- Ask "which card for groceries?" and it ranks your cards.
+- Log a purchase on the wrong card and it tells you which card would have earned more, and how much.
+- It never recommends a card that the purchase would push over 30% utilization. Score beats points.
+- The dashboard's **Which card where** panel shows the best card per category, and using the best card 10 times unlocks **Reward hunter**.
+
+### Connectors (auto-discovered on the Sprite)
+| Connector | What it does in Upscore |
+|---|---|
+| Meta | Muse Spark and Ember (with `LLM_PROVIDER=meta`) |
+| AgentMail | The inbox for forwarded alerts and receipts, plus replies and cancellation emails |
+| Slack (Bot) | Chat with Pip in a channel or DM |
+| Deepgram | Voice in (dashboard mic, Telegram voice notes) and Pip's spoken voice |
+| Era | Real bank accounts and transactions, synced every 30 minutes |
+| Pushover | Phone push for due dates, missed payments and achievements |
+| Tavily / Exa | Web search for current rotating categories and cancellation steps |
+| Pinecone | Semantic search over your history ("how much on coffee since September?") |
+| TypeSafeAI | Jev assigns each purchase a spending category, which drives the rewards logic |
+| Box | Statement photos and PDFs are archived to a Box folder |
+
+Any connector that isn't connected is skipped quietly. The dashboard's **Connected** strip shows which ones are live.
+
 ### Models: one flag
 `LLM_PROVIDER=ollama` (the default on our Sprite) is **free**: Ollama runs on the Sprite itself with `qwen3.5:4b`, a small CPU model that supports tool calling and vision. `LLM_PROVIDER=meta` switches to Muse Spark and Muse Ember through the Meta connector, which is paid. Any `LLM_*` variable overrides the preset.
 

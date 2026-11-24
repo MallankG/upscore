@@ -2,7 +2,7 @@
 Everything is recomputed from data (txns, scores, kv), so it can never drift out of sync."""
 from datetime import date, timedelta
 
-from . import credit, db
+from . import credit, db, rewards
 
 # id, title, description, icon, xp, metric, target
 ACHIEVEMENTS = [
@@ -24,6 +24,7 @@ ACHIEVEMENTS = [
     ("score_50", "Up fifty", "Score up 50 points", "trend", 250, "gain", 50),
     ("goal", "Goal crusher", "Reach your goal score", "flag", 500, "goal", 1),
     ("snip", "Snip snip", "Cancel a subscription", "scissors", 60, "cancels", 1),
+    ("reward_hunter", "Reward hunter", "Use the best-rewards card 10 times", "coin", 100, "optimal", 10),
     ("uncle", "Survived Uncle Gary", "Turn on Uncle Gary mode", "turkey", 30, "uncle", 1),
 ]
 PATH = ["card_added", "first_log", "scanner", "ontime_1", "util_30", "score_10",
@@ -76,6 +77,7 @@ def metrics(accounts, txns, today):
         "gain": (scores[-1]["score"] - scores[0]["score"]) if len(scores) > 1 else 0,
         "goal": int(bool(goal and scores and scores[-1]["score"] >= goal)),
         "cancels": sum(v == "cancelled" for v in db.sub_status().values()),
+        "optimal": rewards.optimal_count(txns, accounts, db.reward_rules()),
         "uncle": int(db.kv_get("profile:persona") == "uncle" or bool(db.kv_get("ach:uncle"))),
         "_util": u, "_streaks": st, "_scores": scores,
     }

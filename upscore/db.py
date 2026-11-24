@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS txns (
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, chat TEXT, role TEXT, content TEXT);
+CREATE TABLE IF NOT EXISTS card_rewards (       -- % back by category; start/end set for rotating offers
+  id INTEGER PRIMARY KEY, card TEXT NOT NULL COLLATE NOCASE, category TEXT NOT NULL, rate REAL NOT NULL,
+  start TEXT, end TEXT, cap REAL, note TEXT,
+  UNIQUE(card, category, start));
 CREATE TABLE IF NOT EXISTS scores (date TEXT PRIMARY KEY, score INTEGER NOT NULL);  -- one per day, last wins
 """
 
@@ -84,6 +88,16 @@ def log_score(score, date_=None):
         raise ValueError("credit scores run 300-850")
     run("INSERT INTO scores(date, score) VALUES(?,?) ON CONFLICT(date) DO UPDATE SET score=excluded.score",
         (date_ or date.today().isoformat(), score))
+
+
+def set_reward(card, category, rate, start=None, end=None, cap=None, note=None):
+    run("""INSERT INTO card_rewards(card, category, rate, start, end, cap, note) VALUES(?,?,?,?,?,?,?)
+           ON CONFLICT(card, category, start) DO UPDATE SET rate=excluded.rate, end=excluded.end,
+           cap=excluded.cap, note=excluded.note""", (card, category, float(rate), start, end, cap, note))
+
+
+def reward_rules():
+    return q("SELECT * FROM card_rewards")
 
 
 def sub_status():

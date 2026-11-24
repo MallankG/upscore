@@ -1,12 +1,14 @@
-"""Speech-to-text for voice notes (Telegram, dashboard fallback) via the Sprites Deepgram connector.
-The dashboard mic normally uses the browser's own free speech recognition and never reaches this."""
+"""Pip's ears and voice via the Sprites Deepgram connector: speech-to-text for the dashboard mic and Telegram
+voice notes, and text-to-speech for spoken replies."""
 import json
 import os
 import urllib.error
 import urllib.request
 
+from . import connectors
+
 # e.g. https://api.sprites.dev/v1/gateway/deepgram/<connection_id>  (direct: https://api.deepgram.com)
-DEEPGRAM_BASE = os.environ.get("DEEPGRAM_BASE_URL", "").rstrip("/")
+DEEPGRAM_BASE = connectors.base("deepgram")
 DEEPGRAM_KEY = os.environ.get("DEEPGRAM_API_KEY", "")  # local dev only; on a Sprite the connector injects it
 DEEPGRAM_MODEL = os.environ.get("DEEPGRAM_MODEL", "nova-3")
 
@@ -28,3 +30,19 @@ def transcribe(mime, data):
     if not text:
         raise ValueError("I couldn't make out any words in that voice note. Try again?")
     return text
+
+
+TTS_MODEL = os.environ.get("DEEPGRAM_TTS_MODEL", "aura-2-thalia-en")
+
+
+def speak(text):
+    """Pip's voice: Deepgram text-to-speech, returns (mime, mp3 bytes) or None when not connected."""
+    if not DEEPGRAM_BASE:
+        return None
+    headers = {"Content-Type": "application/json"}
+    if DEEPGRAM_KEY:
+        headers["Authorization"] = f"Token {DEEPGRAM_KEY}"
+    req = urllib.request.Request(f"{DEEPGRAM_BASE}/v1/speak?model={TTS_MODEL}&encoding=mp3",
+                                 data=json.dumps({"text": text[:1800]}).encode(), method="POST", headers=headers)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return r.headers.get("Content-Type", "audio/mpeg"), r.read()
