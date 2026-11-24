@@ -325,6 +325,13 @@ class IntegrationTest(unittest.TestCase):
         best = self.agent.call_tool("best_card", {"category": "restaurants"}, "web")
         self.assertEqual(best["pick"]["card"], "Gold")
 
+    def test_16_payment_links_card_named_as_merchant(self):
+        self.db.upsert_account("Link Card", credit_limit=1000, balance=600)
+        out = self.agent.call_tool("add_transaction", {"amount": 500, "merchant": "link card", "kind": "payment"}, "web")
+        self.assertEqual(out["account"], "Link Card")
+        self.assertAlmostEqual(out["card_utilization_now"], 0.1)
+        self.assertEqual(self.db.q("SELECT balance FROM accounts WHERE name='Link Card'")[0]["balance"], 100)
+
     def test_15_pushover_web_search_pinecone_box_tts(self):
         self.assertTrue(self.integ.push("Upscore", "Chase due Friday"))
         self.assertEqual(self.posts("/1/messages.json")[0], {"user": "u123", "title": "Upscore", "message": "Chase due Friday"})

@@ -179,11 +179,18 @@ def call_tool(name, args, source):
                 cat = integrations.categorize(args["merchant"], args.get("note")) or rewards.normalize(cat)
             except Exception:  # Jev is a nice-to-have; never block logging on it
                 cat = rewards.normalize(cat)
+        account = args.get("account")
+        if not account and args.get("kind") in ("payment", "refund"):  # "paid $X on Chase" names the card as merchant
+            names = {a["name"].lower(): a["name"] for a in load()[0]}
+            account = names.get(args["merchant"].strip().lower())
         out = db.add_txn(args["amount"], args["merchant"], args.get("kind", "purchase"), args.get("date"),
-                         cat, args.get("account"), args.get("recurring", False), source, args.get("note"))
-        tip = rewards.missed({**args, "kind": args.get("kind", "purchase"), "category": cat,
-                              "date": args.get("date") or date.today().isoformat()}, load()[0], db.reward_rules())
-        return {**out, "category": cat, **({"tip": tip} if tip else {})}
+                         cat, account, args.get("recurring", False), source, args.get("note"))
+        accounts = load()[0]
+        tip = rewards.missed({**args, "account": account, "kind": args.get("kind", "purchase"), "category": cat,
+                              "date": args.get("date") or date.today().isoformat()}, accounts, db.reward_rules())
+        u = credit.utilization(accounts)  # real numbers for the reply, so the model never guesses them
+        return {**out, "category": cat, "account": account, "card_utilization_now": u["per_card"].get(account),
+                "overall_utilization_now": u["overall"], **({"tip": tip} if tip else {})}
     if name == "best_card":
         return rewards.best_card(args["category"], load()[0], db.reward_rules(), amount=float(args.get("amount") or 0))
     if name == "set_card_reward":
