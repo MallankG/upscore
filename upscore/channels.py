@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 from datetime import date
 
-from . import agent, connectors, credit, db, gamify, integrations
+from . import agent, budget, connectors, credit, db, gamify, integrations
 
 log = logging.getLogger("upscore")
 
@@ -34,6 +34,8 @@ SLACK_POLL_SECS = int(os.environ.get("SLACK_POLL_SECS", "5"))
 # ---------- AgentMail ----------
 
 def am(method, path, body=None):
+    if method == "POST" and (path.endswith("/send") or path.endswith("/reply")):
+        budget.take("email_out")  # every outgoing email (replies, reminders, cancellations) passes here
     headers = {"Authorization": f"Bearer {AGENTMAIL_KEY}"} if AGENTMAIL_KEY else {}
     return agent.http_json(method, AGENTMAIL_BASE + path, body, headers, timeout=30)
 
@@ -53,6 +55,11 @@ def poll_email_once():
         mid = m["message_id"]
         if db.kv_get("seen:" + mid) or "sent" in (m.get("labels") or []):
             continue
+        try:
+            budget.take("email_in")
+        except budget.BudgetExceeded:
+            log.warning("email_in budget reached; leaving the rest unread until tomorrow")
+            return
         db.kv_set("seen:" + mid, 1)
         full = am("GET", f"{inbox_path()}/messages/{urllib.parse.quote(mid, safe='')}")
         body = full.get("extracted_text") or full.get("text") or full.get("preview") or ""

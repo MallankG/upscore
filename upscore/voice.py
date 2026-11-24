@@ -5,7 +5,7 @@ import os
 import urllib.error
 import urllib.request
 
-from . import connectors
+from . import budget, connectors
 
 # e.g. https://api.sprites.dev/v1/gateway/deepgram/<connection_id>  (direct: https://api.deepgram.com)
 DEEPGRAM_BASE = connectors.base("deepgram")
@@ -16,6 +16,7 @@ DEEPGRAM_MODEL = os.environ.get("DEEPGRAM_MODEL", "nova-3")
 def transcribe(mime, data):
     if not DEEPGRAM_BASE:
         raise ValueError("I can't hear voice notes yet: add the Deepgram connector (or use the mic on the dashboard).")
+    budget.take("deepgram_stt")
     headers = {"Content-Type": mime.split(";")[0]}
     if DEEPGRAM_KEY:
         headers["Authorization"] = f"Token {DEEPGRAM_KEY}"
@@ -39,6 +40,10 @@ def speak(text):
     """Pip's voice: Deepgram text-to-speech, returns (mime, mp3 bytes) or None when not connected."""
     if not DEEPGRAM_BASE:
         return None
+    try:
+        budget.take("deepgram_tts")
+    except budget.BudgetExceeded:
+        return None  # the dashboard falls back to the browser's own voice
     headers = {"Content-Type": "application/json"}
     if DEEPGRAM_KEY:
         headers["Authorization"] = f"Token {DEEPGRAM_KEY}"

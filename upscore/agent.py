@@ -236,6 +236,9 @@ def call_tool(name, args, source):
 
 
 def llm(messages, model=None):
+    if LLM_PROVIDER != "ollama":  # local Ollama is free; anything hosted is metered
+        from . import budget
+        budget.take("meta_llm")
     headers = {"Authorization": f"Bearer {LLM_API_KEY}"} if LLM_API_KEY else {}
     body = {"model": model or LLM_MODEL, "messages": messages, "max_tokens": 1500,
             "tools": [{"type": "function", "function": t} for t in TOOLS]}

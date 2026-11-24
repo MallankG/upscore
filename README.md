@@ -45,6 +45,22 @@ Pip knows each card's reward rates, including **rotating quarterly categories** 
 
 Any connector that isn't connected is skipped quietly. The dashboard's **Connected** strip shows which ones are live.
 
+### Stays free: guardrails
+- **LLM:** `LLM_PROVIDER=ollama` runs on the Sprite's own CPU, so there are no per-token costs. Hosted models are capped (see below).
+- **Daily caps per metered service** (`upscore/budget.py`), sized to stay inside each free tier:
+
+  | Service | Cap per day | Free tier it protects |
+  |---|---|---|
+  | Tavily search | 30 | 1,000 searches/month |
+  | Deepgram speech-to-text / text-to-speech | 40 / 40 | free credit |
+  | Pinecone search / upsert batches | 100 / 100 | Starter plan read/write units |
+  | Meta (only if `LLM_PROVIDER=meta`) | 150 calls | paid; off by default |
+  | Emails processed / sent (AgentMail) | 60 / 20 | free plan |
+  | Pushover | 50 | 10,000/month |
+
+  When a cap is hit, nothing is spent and nothing is lost. Emails stay unread until tomorrow, Pip's voice falls back to the browser's, and the agent says the limit resets tomorrow. Override with `BUDGET_<NAME>=n` (0 turns a service off). Today's usage is in `/api/summary` → `budgets`.
+- **Built-in limits:** at most 8 model steps per message, files up to 10 MB, the dashboard behind `WEB_TOKEN`, one Slack channel, and emails replied to only for `OWNER_EMAILS`.
+
 ### Models: one flag
 `LLM_PROVIDER=ollama` (the default on our Sprite) is **free**: Ollama runs on the Sprite itself with `qwen3.5:4b`, a small CPU model that supports tool calling and vision. `LLM_PROVIDER=meta` switches to Muse Spark and Muse Ember through the Meta connector, which is paid. Any `LLM_*` variable overrides the preset.
 

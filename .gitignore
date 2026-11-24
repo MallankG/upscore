@@ -5,3 +5,5 @@ __pycache__/
 .env.*
 !.env.example
 brag-output/work/
+brag-output-*/composition/node_modules/
+brag-output-*/composition/.hyperframes/

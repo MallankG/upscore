@@ -15,7 +15,7 @@ import urllib.request
 import uuid
 from datetime import date, timedelta
 
-from . import connectors, db, rewards
+from . import budget, connectors, db, rewards
 from .agent import http_json
 
 log = logging.getLogger("upscore")
@@ -100,6 +100,7 @@ def push(title, message):
     base = connectors.base("pushover")
     if not (base and PUSHOVER_USER):
         return False
+    budget.take("pushover")
     body = urllib.parse.urlencode({"user": PUSHOVER_USER, "title": title, "message": message[:1000]}).encode()
     req = urllib.request.Request(base + "/1/messages.json", data=body, method="POST",
                                  headers={"Content-Type": "application/x-www-form-urlencoded"})
@@ -111,12 +112,14 @@ def push(title, message):
 
 def web_search(query, n=5):
     if connectors.base("tavily"):
+        budget.take("tavily")
         out = http_json("POST", connectors.base("tavily") + "/search",
                         {"query": query, "max_results": n, "include_answer": True})
         return {"answer": out.get("answer"),
                 "results": [{"title": r.get("title"), "url": r.get("url"), "text": (r.get("content") or "")[:600]}
                             for r in out.get("results", [])]}
     if connectors.base("exa"):
+        budget.take("exa")
         out = http_json("POST", connectors.base("exa") + "/search",
                         {"query": query, "numResults": n, "contents": {"text": {"maxCharacters": 600}}})
         return {"results": [{"title": r.get("title"), "url": r.get("url"), "text": r.get("text")}
@@ -156,6 +159,7 @@ def pinecone_index_new():
                          "text": f"{t['date']} {t['kind']} ${t['amount']:.2f} {t['merchant']} "
                                  f"{t.get('category') or ''} {t.get('account') or ''} {t.get('note') or ''}".strip()})
              for t in rows]
+    budget.take("pinecone_upsert")
     _pc(f"/indexes/{PINECONE_INDEX}/records/namespaces/txns/upsert", ndjson="\n".join(lines))
     db.kv_set("pinecone:last_id", rows[-1]["id"])
     return len(rows)
@@ -164,6 +168,7 @@ def pinecone_index_new():
 def search_history(query, k=12):
     if not connectors.base("pinecone"):
         return {"error": "Pinecone isn't connected; use recent_transactions instead."}
+    budget.take("pinecone_search")
     out = _pc(f"/indexes/{PINECONE_INDEX}/records/namespaces/txns/search",
               {"query": {"inputs": {"text": query}, "top_k": k}, "fields": ["text", "date", "amount", "kind"]})
     hits = out.get("result", {}).get("hits", [])

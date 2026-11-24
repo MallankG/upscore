@@ -145,6 +145,24 @@ class RewardsTest(unittest.TestCase):
         self.assertEqual((sheet["dining"], sheet["gas"]), ("Amex Gold", "Freedom"))
 
 
+class BudgetTest(unittest.TestCase):
+    def test_caps_refuse_without_spending_and_reset_daily(self):
+        from upscore import budget
+        day = date(2025, 5, 1)
+        os.environ["BUDGET_TAVILY"] = "2"
+        try:
+            budget.take("tavily", day=day)
+            budget.take("tavily", day=day)
+            with self.assertRaises(budget.BudgetExceeded):
+                budget.take("tavily", day=day)
+            self.assertEqual(budget.used("tavily", day), 2)          # refusal spends nothing
+            budget.take("tavily", day=date(2025, 5, 2))            # new day, new budget
+        finally:
+            os.environ.pop("BUDGET_TAVILY")
+        self.assertLessEqual(budget.LIMITS["tavily"] * 31, 1000)   # stays inside Tavily's free month
+        self.assertTrue(issubclass(budget.BudgetExceeded, ValueError))
+
+
 class ProviderTest(unittest.TestCase):
     def test_provider_flag_presets_and_overrides(self):
         import importlib

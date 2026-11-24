@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import agent, channels, connectors, credit, db, gamify, rewards, voice
+from . import agent, budget, channels, connectors, credit, db, gamify, rewards, voice
 
 PORT = int(os.environ.get("PORT", "8080"))
 WEB_TOKEN = os.environ.get("WEB_TOKEN", "")  # set this if the Sprite URL is public: it guards your financial data
@@ -46,7 +46,7 @@ class Handler(BaseHTTPRequestHandler):
                    "scores": db.q("SELECT date, score FROM scores ORDER BY date"),
                    "game": gamify.state(accounts, txns),
                    "cards_where": rewards.cheat_sheet(accounts, db.reward_rules()),
-                   "connectors": connectors.status()}
+                   "connectors": connectors.status(), "budgets": budget.today()}
             return self.send(200, json.dumps(out, default=str))
         self.send(404, "not found", "text/plain")
 

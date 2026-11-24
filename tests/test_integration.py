@@ -349,5 +349,20 @@ class IntegrationTest(unittest.TestCase):
         self.assertEqual(voice.speak("hello"), ("audio/mpeg", b"ID3x"))
 
 
+    def test_17_budget_caps_on_live_paths(self):
+        from upscore import voice
+        os.environ.update(BUDGET_EMAIL_IN="0", BUDGET_DEEPGRAM_TTS="0", BUDGET_EMAIL_OUT="0")
+        try:
+            self.db.run("DELETE FROM kv WHERE key LIKE 'seen:%'")
+            self.channels.poll_email_once()
+            self.assertIsNone(self.db.kv_get("seen:<m1@x>"))      # left unread for tomorrow, not dropped
+            self.assertIsNone(voice.speak("hi"))                    # dashboard falls back to browser voice
+            with self.assertRaises(ValueError):
+                self.channels.send_email("x", "y")                  # outgoing mail capped too
+        finally:
+            for k in ("BUDGET_EMAIL_IN", "BUDGET_DEEPGRAM_TTS", "BUDGET_EMAIL_OUT"):
+                os.environ.pop(k)
+
+
 if __name__ == "__main__":
     unittest.main()
