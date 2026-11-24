@@ -128,39 +128,53 @@ def web_search(query, n=5):
 
 
 # ---------- Pinecone: semantic memory over transactions ----------
+# The Sprites connector forwards /embed, /indexes (list) and per-index vector routes, but not index creation:
+# create a serverless index named PINECONE_INDEX (dimension 1024, cosine) once in the Pinecone console.
+EMBED_MODEL = "multilingual-e5-large"  # Pinecone-hosted, 1024 dims
 
-def _pc(path, body=None, ndjson=None):
-    base = connectors.base("pinecone")
-    headers = {"X-Pinecone-API-Version": "2025-04"}
-    if ndjson is not None:
-        req = urllib.request.Request(base + path, data=ndjson.encode(), method="POST",
-                                     headers={**headers, "Content-Type": "application/x-ndjson"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.read()
-    return http_json("POST", base + path, body, headers, timeout=30)
+
+def _pc(method, path, body=None):
+    return http_json(method, connectors.base("pinecone") + path, body, {"X-Pinecone-API-Version": "2025-04"}, timeout=30)
+
+
+def _embed(texts, kind):
+    out = _pc("POST", "/embed", {"model": EMBED_MODEL, "inputs": [{"text": t} for t in texts],
+                                 "parameters": {"input_type": kind, "truncate": "END"}})
+    return [d["values"] for d in out["data"]]
+
+
+def _txn_text(t):
+    return (f"{t['date']} {t['kind']} ${t['amount']:.2f} {t['merchant']} {t.get('category') or ''} "
+            f"{t.get('account') or ''} {t.get('note') or ''}").strip()
+
+
+def pinecone_ready():
+    if db.kv_get("pinecone:ready"):
+        return True
+    names = [i.get("name") for i in _pc("GET", "/indexes").get("indexes", [])]
+    if PINECONE_INDEX in names:
+        db.kv_set("pinecone:ready", 1)
+        return True
+    if not db.kv_get("pinecone:warned"):
+        log.warning("Pinecone index %r not found: create it in the Pinecone console (serverless, dim 1024, cosine)", PINECONE_INDEX)
+        db.kv_set("pinecone:warned", 1)
+    return False
 
 
 def pinecone_index_new():
-    """Upsert transactions not yet indexed (batched from the background loop, never on the chat path)."""
-    if not connectors.base("pinecone"):
+    """Embed + upsert transactions not yet indexed (background loop, never on the chat path)."""
+    if not connectors.base("pinecone") or not pinecone_ready():
         return 0
-    if not db.kv_get("pinecone:ready"):
-        try:  # integrated-embedding index: Pinecone embeds the text itself
-            _pc("/indexes/create-for-model", {"name": PINECONE_INDEX, "cloud": "aws", "region": "us-east-1",
-                                              "embed": {"model": "llama-text-embed-v2", "field_map": {"text": "text"}}})
-        except Exception as e:  # already exists is fine
-            log.info("pinecone create-for-model: %s", str(e)[:200])
-        db.kv_set("pinecone:ready", 1)
     last = int(db.kv_get("pinecone:last_id", 0))
     rows = db.q("SELECT * FROM txns WHERE id > ? ORDER BY id LIMIT 90", (last,))
     if not rows:
         return 0
-    lines = [json.dumps({"_id": f"t{t['id']}", "date": t["date"], "amount": t["amount"], "kind": t["kind"],
-                         "text": f"{t['date']} {t['kind']} ${t['amount']:.2f} {t['merchant']} "
-                                 f"{t.get('category') or ''} {t.get('account') or ''} {t.get('note') or ''}".strip()})
-             for t in rows]
     budget.take("pinecone_upsert")
-    _pc(f"/indexes/{PINECONE_INDEX}/records/namespaces/txns/upsert", ndjson="\n".join(lines))
+    texts = [_txn_text(t) for t in rows]
+    vecs = _embed(texts, "passage")
+    _pc("POST", f"/indexes/{PINECONE_INDEX}/vectors/upsert", {"namespace": "txns", "vectors": [
+        {"id": f"t{t['id']}", "values": v, "metadata": {"text": txt, "date": t["date"], "amount": t["amount"], "kind": t["kind"]}}
+        for t, v, txt in zip(rows, vecs, texts)]})
     db.kv_set("pinecone:last_id", rows[-1]["id"])
     return len(rows)
 
@@ -168,11 +182,12 @@ def pinecone_index_new():
 def search_history(query, k=12):
     if not connectors.base("pinecone"):
         return {"error": "Pinecone isn't connected; use recent_transactions instead."}
+    if not pinecone_ready():
+        return {"error": "Pinecone index isn't created yet; use recent_transactions instead."}
     budget.take("pinecone_search")
-    out = _pc(f"/indexes/{PINECONE_INDEX}/records/namespaces/txns/search",
-              {"query": {"inputs": {"text": query}, "top_k": k}, "fields": ["text", "date", "amount", "kind"]})
-    hits = out.get("result", {}).get("hits", [])
-    return {"matches": [h.get("fields", {}) | {"score": round(h.get("_score", 0), 3)} for h in hits]}
+    out = _pc("POST", f"/indexes/{PINECONE_INDEX}/query",
+              {"namespace": "txns", "vector": _embed([query], "query")[0], "topK": k, "includeMetadata": True})
+    return {"matches": [m.get("metadata", {}) | {"score": round(m.get("score", 0), 3)} for m in out.get("matches", [])]}
 
 
 # ---------- TypeSafeAI: Jev picks the category ----------
