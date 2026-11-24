@@ -3,7 +3,7 @@ import os
 import unittest
 from datetime import date
 
-os.environ["UPSCORE_DB"] = ":memory:"
+os.environ.update(UPSCORE_DB=":memory:", UPSCORE_ENV="/nonexistent", CONNECTOR_DISCOVERY="0")  # never the live config
 from upscore import agent, credit, db  # noqa: E402
 
 T = date(2026, 11, 23)

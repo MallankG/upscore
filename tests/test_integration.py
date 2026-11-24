@@ -7,7 +7,7 @@ import unittest
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-os.environ.update(UPSCORE_DB=":memory:", UPSCORE_ENV="/nonexistent")
+os.environ.update(UPSCORE_DB=":memory:", UPSCORE_ENV="/nonexistent", CONNECTOR_DISCOVERY="0")
 CALLS = []
 SCRIPT = []      # queued assistant messages; when non-empty they replace fake_llm's default behaviour
 TG_QUEUE = []    # extra Telegram updates to deliver
