@@ -64,7 +64,11 @@ class Mock(BaseHTTPRequestHandler):
         self.reply({})
 
     def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if "/v1/listen" in self.path:  # Deepgram: raw audio in, transcript out
+            CALLS.append(("POST", self.path, {"content_type": self.headers["Content-Type"], "bytes": len(raw)}))
+            return self.reply({"results": {"channels": [{"alternatives": [{"transcript": "spent twenty dollars on tacos"}]}]}})
+        body = json.loads(raw or b"{}")
         CALLS.append(("POST", self.path, body))
         if self.path.endswith("/chat/completions"):
             return self.reply({"choices": [{"message": fake_llm(body)}]})
@@ -89,9 +93,10 @@ class IntegrationTest(unittest.TestCase):
         base = f"http://127.0.0.1:{cls.srv.server_port}"
         os.environ.update(LLM_BASE_URL=base, AGENTMAIL_BASE_URL=base, AGENTMAIL_INBOX="up@agentmail.to",
                           OWNER_EMAILS="me@ex.com", SLACK_BASE_URL=base, SLACK_CHANNEL="D1",
-                          TELEGRAM_BOT_TOKEN="x", TELEGRAM_API_BASE=base)
+                          TELEGRAM_BOT_TOKEN="x", TELEGRAM_API_BASE=base, DEEPGRAM_BASE_URL=base)
         import importlib
-        from upscore import agent, channels, db
+        from upscore import agent, channels, db, voice
+        importlib.reload(voice)
         importlib.reload(agent)
         importlib.reload(channels)
         cls.agent, cls.channels, cls.db = agent, channels, db
@@ -106,7 +111,7 @@ class IntegrationTest(unittest.TestCase):
     def posts(self, suffix):
         return [c[2] for c in CALLS if c[0] == "POST" and c[1].endswith(suffix)]
 
-    def test_1_email_ingest_uses_ember_and_replies_once(self):
+    def test_01_email_ingest_uses_ember_and_replies_once(self):
         self.channels.poll_email_once()
         self.channels.poll_email_once()  # already seen: no-op
         llm = self.posts("/chat/completions")
@@ -116,7 +121,7 @@ class IntegrationTest(unittest.TestCase):
         acct = self.db.q("SELECT balance FROM accounts WHERE name='Chase Freedom'")[0]
         self.assertAlmostEqual(acct["balance"], 84.12)
 
-    def test_2_slack_skips_bots_and_uses_spark(self):
+    def test_02_slack_skips_bots_and_uses_spark(self):
         self.channels.poll_slack_once()  # first run only sets the cursor
         self.assertFalse(self.posts("/chat/completions"))
         self.channels.poll_slack_once()
@@ -126,14 +131,14 @@ class IntegrationTest(unittest.TestCase):
         self.assertEqual(self.db.kv_get("slack_oldest"), "1795000002.000200")
         self.assertTrue(self.db.q("SELECT 1 FROM txns WHERE merchant='Chipotle' AND source='slack'"))
 
-    def test_3_telegram_claims_owner_and_records_payment(self):
+    def test_03_telegram_claims_owner_and_records_payment(self):
         self.channels.poll_telegram_once()
         self.assertEqual(self.db.kv_get("telegram_chat_id"), "42")
         self.assertEqual(self.posts("/sendMessage")[-1], {"chat_id": 42, "text": "Logged it."})
         bal = self.db.q("SELECT balance FROM accounts WHERE name='Chase Freedom'")[0]["balance"]
         self.assertAlmostEqual(bal, 84.12 + 12.5 - 300)  # email + slack purchases, minus payment
 
-    def test_4_reminders_fan_out_once(self):
+    def test_04_reminders_fan_out_once(self):
         from datetime import date, timedelta
         soon = date.today() + timedelta(days=2)
         self.db.upsert_account("Chase Freedom", credit_limit=1000, balance=500, due_day=soon.day)
@@ -143,7 +148,7 @@ class IntegrationTest(unittest.TestCase):
         self.assertEqual(len(self.posts("/chat.postMessage")), 1)
         self.assertEqual(len(self.posts("/messages/send")), 1)
 
-    def test_5_web_chat_endpoint(self):
+    def test_05_web_chat_endpoint(self):
         from upscore import server
         web = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=web.serve_forever, daemon=True).start()
@@ -155,7 +160,7 @@ class IntegrationTest(unittest.TestCase):
             web.shutdown()
 
 
-    def test_6_telegram_photo_goes_to_model_as_image(self):
+    def test_06_telegram_photo_goes_to_model_as_image(self):
         TG_QUEUE.append({"update_id": 8, "message": {"chat": {"id": 42}, "caption": "my statement",
                                                      "photo": [{"file_id": "small"}, {"file_id": "big"}]}})
         self.channels.poll_telegram_once()
@@ -163,10 +168,11 @@ class IntegrationTest(unittest.TestCase):
         content = self.posts("/chat/completions")[0]["messages"][-1]["content"]
         self.assertEqual(content[0], {"type": "text", "text": "my statement"})
         self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
+        self.assertIn("Paper trail", self.posts("/sendMessage")[-1]["text"])  # first upload unlocks it
         hist = self.db.q("SELECT content FROM history WHERE chat='telegram' ORDER BY id DESC LIMIT 2")
         self.assertIn("[attached photo.jpg]", hist[1]["content"])
 
-    def test_7_cancel_draft_then_send_marks_cancelled(self):
+    def test_07_cancel_draft_then_send_marks_cancelled(self):
         self.db.add_txn(15.49, "Netflix", "purchase", "2026-11-05", "streaming", recurring=True, source="t")
         call = lambda name, args: {"role": "assistant", "content": None, "tool_calls": [  # noqa: E731
             {"id": name, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]}
@@ -184,7 +190,7 @@ class IntegrationTest(unittest.TestCase):
         subs = self.agent.call_tool("get_summary", {}, "web")["subscriptions"]
         self.assertNotIn("Netflix", [x["merchant"] for x in subs])
 
-    def test_8_weekly_checkin_once_per_week(self):
+    def test_08_weekly_checkin_once_per_week(self):
         from datetime import datetime
         sunday = datetime(2026, 11, 29, 11)
         self.channels.run_reminders_once(sunday)
@@ -194,7 +200,7 @@ class IntegrationTest(unittest.TestCase):
         self.channels.run_reminders_once(datetime(2026, 11, 30, 11))  # Monday: nothing new
         self.assertEqual(len([p for p in self.posts("/sendMessage") if "Weekly" in p["text"]]), 1)
 
-    def test_9_simulate_score_and_uncle_persona(self):
+    def test_09_simulate_score_and_uncle_persona(self):
         self.agent.call_tool("upsert_account", {"name": "Sim Card", "credit_limit": 1000, "balance": 800}, "web")
         self.agent.call_tool("set_profile", {"key": "credit_score", "value": "650"}, "web")
         sim = self.agent.call_tool("simulate", {"changes": [{"account": "sim card", "amount": 710}]}, "web")
@@ -215,9 +221,10 @@ class IntegrationTest(unittest.TestCase):
         try:
             pdf = {"name": "stmt.pdf", "mime": "application/pdf", "data": base64.b64encode(b"%PDF-1.4 fake").decode()}
             req = urllib.request.Request(url, data=json.dumps({"files": [pdf]}).encode(), method="POST")
+            before = int(self.db.kv_get("count:uploads", 0))
             reply = json.load(urllib.request.urlopen(req))["reply"]
             self.assertTrue(reply.startswith("Logged it."))
-            self.assertIn("Paper trail", reply)  # first statement upload unlocks the achievement
+            self.assertEqual(int(self.db.kv_get("count:uploads")), before + 1)
             part = self.posts("/chat/completions")[0]["messages"][-1]["content"][1]
             self.assertEqual(part["file"]["filename"], "stmt.pdf")
             bad = {"name": "x.zip", "mime": "application/zip", "data": "AAAA"}
@@ -227,6 +234,31 @@ class IntegrationTest(unittest.TestCase):
             self.assertEqual(e.exception.code, 400)
         finally:
             web.shutdown()
+
+
+    def test_11_telegram_voice_note_is_transcribed(self):
+        TG_QUEUE.append({"update_id": 9, "message": {"chat": {"id": 42}, "voice": {"file_id": "v1", "mime_type": "audio/ogg"}}})
+        self.channels.poll_telegram_once()
+        listen = [c for c in CALLS if "/v1/listen" in c[1]]
+        self.assertEqual(listen[0][2]["content_type"], "audio/ogg")
+        self.assertIn("model=nova-3", listen[0][1])
+        self.assertEqual(self.posts("/chat/completions")[0]["messages"][-1]["content"], "spent twenty dollars on tacos")
+        self.assertTrue(self.posts("/sendMessage")[-1]["text"].startswith("🎙 “spent twenty dollars on tacos”"))
+
+    def test_12_dashboard_audio_and_missing_stt(self):
+        import base64
+        audio = [("voice-note", "audio/webm;codecs=opus", b"\x1aE fake webm")]
+        reply = self.agent.respond("web", "", "web", audio)
+        self.assertTrue(reply.startswith("🎙 “spent twenty dollars on tacos”"))
+        listen = [c for c in CALLS if "/v1/listen" in c[1]]
+        self.assertEqual(listen[-1][2]["content_type"], "audio/webm")  # codec params stripped
+        self.agent.voice.DEEPGRAM_BASE = ""
+        try:
+            with self.assertRaises(ValueError) as e:
+                self.agent.respond("web", "", "web", audio)
+            self.assertIn("Deepgram", str(e.exception))
+        finally:
+            self.agent.voice.DEEPGRAM_BASE = os.environ["DEEPGRAM_BASE_URL"]
 
 
 if __name__ == "__main__":

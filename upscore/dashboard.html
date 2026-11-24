@@ -151,6 +151,10 @@ details summary { cursor: pointer; list-style: none; margin: 0 } details summary
 .icon-btn { width: 44px; height: 44px; flex: none; border-radius: 14px; display: grid; place-items: center; cursor: pointer; background: var(--paper-2); color: var(--ink-2) }
 .icon-btn svg { width: 22px; height: 22px }
 .compose .btn { padding: 0 18px }
+.icon-btn.mic { background: var(--tang-l); color: var(--tang-d); border: 0 }
+.icon-btn.mic.live { background: var(--cran); color: var(--paper); animation: pulse 1.2s var(--ease) infinite }
+@keyframes pulse { 50% { transform: scale(0.92) } }
+.icon-btn.spk { border: 0 } .icon-btn.spk[aria-pressed="false"] { opacity: 0.45 }
 
 /* unlock toast */
 .toast { position: fixed; left: 50%; top: 86px; z-index: 30; transform: translate(-50%, -20px); opacity: 0; pointer-events: none;
@@ -180,6 +184,8 @@ details summary { cursor: pointer; list-style: none; margin: 0 } details summary
   <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="7" r="3" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="6" cy="17" r="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M8.4 8.6 20 18M8.4 15.4 20 6"/></symbol>
   <symbol id="i-turkey" viewBox="0 0 24 24"><path fill="currentColor" opacity=".55" d="M12 3a9 9 0 0 0-9 9h3.2a5.8 5.8 0 0 1 11.6 0H21a9 9 0 0 0-9-9z"/><circle cx="12" cy="14.5" r="5.5" fill="currentColor"/><circle cx="12" cy="9.4" r="2.6" fill="currentColor"/><circle cx="12.9" cy="9" r=".75" fill="var(--paper)"/><path fill="var(--cran)" d="M11.2 11.2c-.3 1-.1 1.8.6 2.2.2-.8.1-1.5-.6-2.2z"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5" fill="currentColor"/><path fill="none" stroke="currentColor" stroke-width="2.4" d="M8.2 10.5V8a3.8 3.8 0 0 1 7.6 0v2.5"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="8.5" y="2.5" width="7" height="12" rx="3.5" fill="currentColor"/><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M5 11a7 7 0 0 0 14 0M12 18v3.5"/></symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24"><path fill="currentColor" d="M4 9h3.5L12 5v14l-4.5-4H4z"/><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
   <symbol id="i-clip" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4l7.3-7.3"/></symbol>
 </defs></svg>
 
@@ -238,6 +244,8 @@ details summary { cursor: pointer; list-style: none; margin: 0 } details summary
     <label class="icon-btn" title="Send a statement or receipt (photo or PDF)"><svg aria-hidden="true"><use href="#i-clip"/></svg>
       <span class="sr">Attach a statement</span><input id="file" type="file" accept="image/*,application/pdf" hidden></label>
     <input type="text" id="q" placeholder="Tell Pip: “spent $42 on dinner with my Amex”" autocomplete="off" aria-label="Message Pip">
+    <button class="icon-btn spk" id="spk" type="button" aria-pressed="false" title="Pip reads replies out loud"><svg aria-hidden="true"><use href="#i-speaker"/></svg><span class="sr">Spoken replies</span></button>
+    <button class="icon-btn mic" id="mic" type="button" title="Talk to Pip"><svg aria-hidden="true"><use href="#i-mic"/></svg><span class="sr">Talk to Pip</span></button>
     <button class="btn">Send</button>
   </form>
 </div></div>
@@ -429,12 +437,44 @@ function drawChart(sc, goal) {
 
 /* ---------- chat ---------- */
 function say(text, who) { const m = el('div', text, 'msg ' + who); $('log').append(m); $('log').scrollTop = 1e9; return m; }
+let spoken = localStorage.getItem('upscore:speak') === '1', viaVoice = false;
+$('spk').setAttribute('aria-pressed', spoken);
+$('spk').onclick = () => { spoken = !spoken; localStorage.setItem('upscore:speak', spoken ? '1' : '0'); $('spk').setAttribute('aria-pressed', spoken); if (!spoken) speechSynthesis.cancel(); };
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.replace(/[🎙🏆“”]/gu, '').replace(/\s+/g, ' ').slice(0, 600));
+  u.rate = 1.05; u.pitch = 1.15; speechSynthesis.speak(u);
+}
+
+/* voice input: record in the browser, transcribe on the server through the Deepgram connector */
+let recorder = null;
+function micLive(on) { $('mic').classList.toggle('live', on); $('mic').title = on ? 'Listening… tap to send' : 'Talk to Pip'; }
+$('mic').onclick = async () => {
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  if (recorder) { recorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+    const chunks = []; recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop()); micLive(false);
+      const blob = new Blob(chunks, {type: recorder.mimeType || 'audio/webm'}); recorder = null;
+      if (blob.size < 2000) return;  // a tap, not speech
+      const data = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(blob); });
+      viaVoice = true; send($('q').value.trim(), [{name: 'voice-note', mime: blob.type, data}]).finally(() => viaVoice = false); $('q').value = '';
+    };
+    recorder.start(); micLive(true);
+  } catch (err) { say("Pip can't reach your microphone. Allow mic access and try again.", 'bot'); }
+};
+
 async function send(text, files) {
-  if (text) say(text, 'me'); files?.forEach(f => say('📎 ' + f.name, 'me'));
+  if (text) say(text, 'me'); files?.forEach(f => say(f.mime?.startsWith('audio/') ? '🎙 voice note' : '📎 ' + f.name, 'me'));
   const wait = say('Pip is thinking…', 'bot');
   try {
     const r = await fetch('/api/chat', {method: 'POST', headers: {...H, 'Content-Type': 'application/json'}, body: JSON.stringify({text, files})});
     const d = await r.json(); wait.textContent = d.reply || ("Pip couldn't do that: " + d.error);
+    if (d.reply && (spoken || viaVoice)) speak(d.reply);
   } catch (err) { wait.textContent = "Couldn't reach Pip. Check your connection and try again."; }
   refresh();
 }

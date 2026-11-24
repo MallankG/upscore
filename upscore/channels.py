@@ -90,6 +90,9 @@ def telegram_file(msg):
     """(name, mime, bytes) for a photo (largest size) or document."""
     if msg.get("photo"):
         fid, name, mime = msg["photo"][-1]["file_id"], "photo.jpg", "image/jpeg"
+    elif msg.get("voice") or msg.get("audio"):
+        v = msg.get("voice") or msg["audio"]
+        fid, name, mime = v["file_id"], "voice.ogg", v.get("mime_type", "audio/ogg")
     else:
         d = msg["document"]
         fid, name, mime = d["file_id"], d.get("file_name", "file"), d.get("mime_type", "application/octet-stream")
@@ -105,7 +108,7 @@ def poll_telegram_once():
         db.kv_set("telegram_offset", u["update_id"] + 1)
         msg = u.get("message") or {}
         text, chat_id = msg.get("text") or msg.get("caption") or "", (msg.get("chat") or {}).get("id")
-        has_file = msg.get("photo") or msg.get("document")
+        has_file = msg.get("photo") or msg.get("document") or msg.get("voice") or msg.get("audio")
         if not (text or has_file) or not chat_id:
             continue
         owner = db.kv_get("telegram_chat_id") or os.environ.get("TELEGRAM_CHAT_ID")

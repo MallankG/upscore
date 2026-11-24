@@ -66,7 +66,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, json.dumps({"error": "empty"}))
         try:
             return self.send(200, json.dumps({"reply": agent.respond("web", text, "web", files)}))
-        except ValueError as e:  # unsupported or oversized file
+        except ValueError as e:  # unsupported/oversized file, or voice without an STT connector
             return self.send(400, json.dumps({"error": str(e)}))
         except Exception as e:
             logging.exception("chat failed")

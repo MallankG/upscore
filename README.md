@@ -22,6 +22,12 @@ web dashboard / CLI ──────────────┘   (Muse Ember 
 - **A milestone path** to your goal score, where the next milestone is highlighted.
 - **Unlock celebrations.** New achievements show up as a toast with confetti on the dashboard, and as a "🏆 Achievement unlocked" line in Slack, Telegram or email.
 
+### Models: one flag
+`LLM_PROVIDER=ollama` (the default on our Sprite) is **free**: Ollama runs on the Sprite itself with `qwen3.5:4b`, a small CPU model that supports tool calling and vision. `LLM_PROVIDER=meta` switches to Muse Spark and Muse Ember through the Meta connector, which is paid. Any `LLM_*` variable overrides the preset.
+
+### Voice
+Tap the mic on the dashboard or send a Telegram voice note. The audio is transcribed by the **Deepgram connector**, and Pip shows what it heard ("🎙 …") before acting on it. The speaker button reads Pip's replies aloud.
+
 ### Features
 - **Statements and receipts as images or PDFs.** Send a photo on Telegram or upload one on the dashboard. Muse Spark reads it and records the card and its transactions.
 - **What-if simulator.** "What if I pay $800 on Chase?" returns utilization before and after plus an estimated score range.

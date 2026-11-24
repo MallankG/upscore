@@ -1,9 +1,10 @@
 """LLM agent: OpenAI-compatible /chat/completions with tool calling.
 
-Default: Meta Model API via the Sprites Meta connector. Muse Spark plans and chats; Muse Ember (cheaper,
-built for high-volume tool calls) handles email extraction. Inside a Sprite LLM_BASE_URL is the gateway, e.g.
-  https://api.sprites.dev/v1/gateway/meta/<connection_id>/v1
-and no key is needed. Outside a Sprite (local dev), set LLM_API_KEY. Any OpenAI-compatible endpoint works.
+LLM_PROVIDER picks a preset (every LLM_* var still overrides it):
+  ollama  free: Ollama running on the Sprite itself (default model qwen3.5:4b, tools + vision, CPU-only)
+  meta    paid: Meta Model API via the Sprites Meta connector. Muse Spark chats/plans, Muse Ember reads emails.
+          Set META_BASE_URL to the connector gateway, e.g. https://api.sprites.dev/v1/gateway/meta/<id>/v1
+Outside a Sprite (local dev) set LLM_API_KEY for paid providers.
 """
 import base64
 import json
@@ -13,13 +14,22 @@ import urllib.error
 import urllib.request
 from datetime import date
 
-from . import credit, db, gamify
+from . import credit, db, gamify, voice
 
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.meta.ai/v1").rstrip("/")
-LLM_MODEL = os.environ.get("LLM_MODEL", "muse-spark-1.3")
-LLM_FAST_MODEL = os.environ.get("LLM_FAST_MODEL", "muse-ember-1.0")   # used for email ingestion
-LLM_REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", "low")  # Muse defaults to high/max: slow for chat
+PROVIDERS = {
+    "meta": {"base": os.environ.get("META_BASE_URL", "https://api.meta.ai/v1"),
+             "model": "muse-spark-1.3", "fast": "muse-ember-1.0", "effort": "low"},  # Muse defaults to high/max: slow
+    "ollama": {"base": os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+               "model": "qwen3.5:4b", "fast": "qwen3.5:4b", "effort": "none"},     # no thinking: CPU is slow
+}
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "meta")
+_p = PROVIDERS[LLM_PROVIDER]
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", _p["base"]).rstrip("/")
+LLM_MODEL = os.environ.get("LLM_MODEL", _p["model"])
+LLM_FAST_MODEL = os.environ.get("LLM_FAST_MODEL", _p["fast"])   # used for email ingestion
+LLM_REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", _p["effort"])
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
+LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "240"))  # local CPU models can take a while per step
 FAST_SOURCES = {"email"}
 HISTORY_TURNS = 12
 # ponytail: one agent turn at a time, plenty for a single user; per-chat locks if it ever matters
@@ -169,7 +179,7 @@ def llm(messages, model=None):
             "tools": [{"type": "function", "function": t} for t in TOOLS]}
     if LLM_REASONING_EFFORT:
         body["reasoning_effort"] = LLM_REASONING_EFFORT
-    return http_json("POST", LLM_BASE_URL + "/chat/completions", body, headers)["choices"][0]["message"]
+    return http_json("POST", LLM_BASE_URL + "/chat/completions", body, headers, LLM_TIMEOUT)["choices"][0]["message"]
 
 
 MAX_FILE_BYTES = 10_000_000
@@ -195,7 +205,11 @@ def user_content(text, files):
 
 def respond(chat, text, source, files=()):
     """One agent turn. `chat` keys conversation history (e.g. 'telegram', 'email', 'web').
-    `files` is a list of (name, mime, bytes) images/PDFs."""
+    `files` is a list of (name, mime, bytes): images/PDFs go to the model, audio is transcribed first."""
+    heard = [voice.transcribe(m, d) for _, m, d in files if m.startswith("audio/")]  # outside the lock: network
+    files = [f for f in files if not f[1].startswith("audio/")]
+    if heard:
+        text = " ".join([text, *heard]).strip()
     with TURN_LOCK:
         past = db.q("SELECT role, content FROM history WHERE chat=? ORDER BY id DESC LIMIT ?", (chat, HISTORY_TURNS))[::-1]
         messages = [{"role": "system", "content": system_prompt()}, *past,
@@ -221,6 +235,8 @@ def respond(chat, text, source, files=()):
         fresh = gamify.new_unlocks(*load())
         if fresh:
             reply += "\n\n" + gamify.unlock_text(fresh)
+        if heard:  # show what was heard so a mis-transcription is obvious
+            reply = f"🎙 “{' '.join(heard)}”\n\n{reply}"
         db.run("INSERT INTO history(chat, role, content) VALUES(?,?,?)", (chat, "user", text[:4000]))
         db.run("INSERT INTO history(chat, role, content) VALUES(?,?,?)", (chat, "assistant", reply))
         return reply

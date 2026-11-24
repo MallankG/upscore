@@ -109,6 +109,29 @@ class GamifyTest(unittest.TestCase):
         self.assertIn(st["stage"], [n for _, n in gamify.STAGES])
 
 
+class ProviderTest(unittest.TestCase):
+    def test_provider_flag_presets_and_overrides(self):
+        import importlib
+        env = {k: os.environ.get(k) for k in ("LLM_PROVIDER", "LLM_MODEL")}
+        try:
+            os.environ["LLM_PROVIDER"] = "ollama"
+            os.environ.pop("LLM_MODEL", None)
+            importlib.reload(agent)
+            self.assertEqual((agent.LLM_BASE_URL, agent.LLM_MODEL, agent.LLM_REASONING_EFFORT),
+                             ("http://localhost:11434/v1", "qwen3.5:4b", "none"))
+            os.environ["LLM_MODEL"] = "gemma4:e4b"
+            importlib.reload(agent)
+            self.assertEqual(agent.LLM_MODEL, "gemma4:e4b")
+            os.environ["LLM_PROVIDER"] = "meta"
+            os.environ.pop("LLM_MODEL")
+            importlib.reload(agent)
+            self.assertEqual((agent.LLM_MODEL, agent.LLM_FAST_MODEL), ("muse-spark-1.3", "muse-ember-1.0"))
+        finally:
+            for k, v in env.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+            importlib.reload(agent)
+
+
 class AgentLoopTest(unittest.TestCase):
     def test_tool_call_then_reply(self):
         script = [
