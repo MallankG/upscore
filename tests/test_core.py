@@ -48,7 +48,29 @@ class CreditTest(unittest.TestCase):
 
     def test_reminders(self):
         keys = [k for k, _ in credit.reminders([card()], date(2026, 11, 30))]
-        self.assertEqual(keys, ["close:Chase:2026-12-03"])  # Nov 28 due already passed
+        self.assertEqual(keys, ["missed:Chase:2026-11-28", "close:Chase:2026-12-03"])  # no payment logged
+        paid = [dict(date="2026-11-20", amount=50, merchant="Chase", kind="payment", account="Chase", recurring=0)]
+        keys = [k for k, _ in credit.reminders([card()], date(2026, 11, 30), txns=paid)]
+        self.assertEqual(keys, ["close:Chase:2026-12-03"])
+
+    def test_simulate_paydown(self):
+        sim = credit.simulate([card(), card(name="Amex", credit_limit=5000, balance=0)], {"chase": 1270}, "642")
+        self.assertAlmostEqual(sim["before"]["per_card"]["Chase"], 0.725)
+        self.assertAlmostEqual(sim["after"]["per_card"]["Chase"], 0.09)
+        lo, hi = sim["est_points"]
+        self.assertTrue(0 < lo <= hi)
+        self.assertEqual(sim["est_score"], [642 + lo, 642 + hi])
+        self.assertIn("error", credit.simulate([card()], {"Discover": 10}))
+
+    def test_streaks_and_checkin(self):
+        pays = [dict(date=d, amount=100, merchant="Chase", kind="payment", account="Chase", recurring=0)
+                for d in ("2026-09-20", "2026-10-25", "2026-11-01")]  # cycles ending Sep 28, Oct 28 (Nov 1 is next cycle)
+        self.assertEqual(credit.streaks([card()], pays, T), {"Chase": 2})
+        pays.append(dict(date="2026-11-22", amount=40, merchant="Shell", kind="purchase", account="Chase", recurring=0))
+        msg = credit.checkin([card()], pays, T)
+        self.assertIn("$40.00 this week", msg)
+        self.assertIn("Chase due", msg)
+        self.assertIn("streak: 2", msg)
 
 
 class DbTest(unittest.TestCase):

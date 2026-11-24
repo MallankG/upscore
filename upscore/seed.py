@@ -17,6 +17,14 @@ for amt, m, cat, acct, days, rec in [
 ]:
     db.add_txn(amt, m, "purchase", d(days), cat, acct, rec, "seed")
 db.add_txn(2400, "Acme Corp payroll", "income", d(7), "salary", "Chase Checking", source="seed")
+for months_ago, acct, amt in [(3, "Chase Freedom", 400), (2, "Chase Freedom", 350), (1, "Chase Freedom", 500),
+                              (3, "Amex Blue", 120), (2, "Amex Blue", 90), (1, "Amex Blue", 150)]:
+    db.add_txn(amt, acct, "payment", d(30 * months_ago + 8), account=acct, source="seed")  # paid ~a week before due
+db.run("UPDATE accounts SET balance=0")  # payments above are history; reset balances, then re-apply recent buys
+for t in db.q("SELECT amount, account FROM txns WHERE kind='purchase'"):
+    db.run("UPDATE accounts SET balance=balance+? WHERE name=?", (t["amount"], t["account"]))
+for days, score in [(150, 598), (120, 611), (90, 619), (60, 628), (30, 636), (0, 642)]:
+    db.log_score(score, d(days))
 db.kv_set("profile:credit_score", "642")
 db.kv_set("profile:goal", "720 by June")
 print("seeded", db.DB_PATH)

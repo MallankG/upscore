@@ -33,6 +33,12 @@ No bank credentials. No screen scraping. The connector keeps the API keys out of
 | F5 | Credit pathway | A fixed engine (no LLM) produces prioritized actions; the LLM explains them |
 | F6 | Reminders | A daily check for due dates within 3 days, statement close within 3 days, and utilization over 30% |
 | F7 | Dashboard | A single web page showing utilization, upcoming dates, subscriptions, the plan, and a chat box |
+| F8 | Statement vision | Images and PDFs (via Telegram or dashboard upload) go to Muse Spark, which records the card and its transactions |
+| F9 | What-if simulator | Utilization before and after a payment, plus an estimated score range from FICO-style utilization bands |
+| F10 | Weekly check-in and streaks | A Sunday digest, on-time payment streaks per card, and a missed-payment alert 1–3 days after a due date with no payment logged |
+| F11 | Subscription cancel helper | An AgentMail draft is created, then sent only after the user explicitly confirms; the subscription is then marked cancelled |
+| F12 | Uncle Gary mode | A persona toggle: the Thanksgiving uncle roasts your spending, with the same numbers and plan (aimed at the Weird Uncle Award) |
+| F13 | Score history | Each reported score is logged and charted against the goal |
 
 ## Credit engine rules (deterministic)
 These are based on FICO factor weights: payment history 35%, amounts owed 30%, length of history 15%, new credit 10%, credit mix 10%.

@@ -33,8 +33,10 @@ def utilization(accounts):
             "balance": round(total_bal, 2), "limit": round(total_lim, 2), "per_card": per}
 
 
-def subscriptions(txns, today):
-    """Merchants flagged recurring (or charged in 2+ distinct months for similar amounts) in the last 120 days."""
+def subscriptions(txns, today, status=None):
+    """Merchants flagged recurring (or charged in 2+ distinct months for similar amounts) in the last 120 days.
+    `status` maps lowercase merchant -> 'cancelled'|'active' (user overrides); cancelled ones are dropped."""
+    status = status or {}
     since = (today - timedelta(days=120)).isoformat()
     by_merchant = defaultdict(list)
     for t in txns:
@@ -45,6 +47,8 @@ def subscriptions(txns, today):
         months = {t["date"][:7] for t in ts}
         amounts = [t["amount"] for t in ts]
         similar = max(amounts) - min(amounts) <= max(2.0, 0.1 * max(amounts))
+        if status.get(key) == "cancelled":
+            continue
         if any(t["recurring"] for t in ts) or (len(months) >= 2 and similar):
             latest = max(ts, key=lambda t: t["date"])
             subs.append({"merchant": latest["merchant"], "monthly": round(latest["amount"], 2),
@@ -57,7 +61,7 @@ def monthly_income(txns, today):
     return round(sum(t["amount"] for t in txns if t["kind"] == "income" and t["date"] >= since), 2)
 
 
-def plan(accounts, txns, today=None):
+def plan(accounts, txns, today=None, status=None):
     """Prioritized, dated actions. Lower priority number = do first."""
     today = today or date.today()
     acts = []
@@ -96,7 +100,7 @@ def plan(accounts, txns, today=None):
                      "title": f"Overall utilization is {u['overall']:.0%}. Aim for under 30%, ideally under 10%",
                      "why": "Overall and per-card utilization both count."})
 
-    subs = subscriptions(txns, today)
+    subs = subscriptions(txns, today, status)
     total = round(sum(s["monthly"] for s in subs), 2)
     review = [s for s in subs if s["monthly"] >= 15]
     cats = defaultdict(list)
@@ -123,10 +127,18 @@ def plan(accounts, txns, today=None):
     return sorted(acts, key=lambda x: (x["priority"], x.get("date") or "9999"))
 
 
-def reminders(accounts, today=None, window=3):
-    """(key, text) pairs for upcoming due and statement dates. The key dedupes so each is sent once."""
+def reminders(accounts, today=None, window=3, txns=()):
+    """(key, text) pairs for upcoming due/statement dates and just-missed payments. Keys dedupe sends."""
     today = today or date.today()
     out = []
+    for a in accounts:
+        last_due = past_due_dates(a.get("due_day"), today, 1)
+        if a["kind"] == "credit" and a["balance"] > 0 and last_due and 1 <= (today - last_due[0]).days <= window \
+                and not paid_in_cycle(txns, a["name"], last_due[0]):
+            out.append((f"missed:{a['name']}:{last_due[0]}",
+                        f"🚨 I don't see a payment on {a['name']} (due {last_due[0]:%b %d}). If you haven't paid, pay at "
+                        f"least the minimum today: bureaus only report it late at 30 days, so there's still time. "
+                        f"Already paid? Tell me and I'll log it."))
     for a in accounts:
         if a["kind"] != "credit" or a["balance"] <= 0:
             continue
@@ -144,7 +156,110 @@ def reminders(accounts, today=None, window=3):
     return out
 
 
-def summary(accounts, txns, today=None):
+# ---------- what-if simulator ----------
+
+def util_penalty(u):
+    """Rough score points lost to a utilization level (FICO-style bands; not an official model)."""
+    if u is None:
+        return 0
+    for limit, pts in ((0.0, 10), (0.10, 0), (0.20, 10), (0.30, 20), (0.50, 40), (0.75, 60)):
+        if u <= limit:
+            return pts
+    return 80
+
+
+def _penalty(accounts):
+    u = utilization(accounts)
+    worst = max(u["per_card"].values(), default=None)
+    return 0.7 * util_penalty(u["overall"]) + 0.3 * util_penalty(worst), u
+
+
+def simulate(accounts, changes, current_score=None):
+    """changes: {account: amount}; positive = pay down before the statement, negative = new charges."""
+    names = {a["name"].lower(): a["name"] for a in accounts}
+    unknown = [k for k in changes if k.lower() not in names]
+    if unknown:
+        return {"error": f"unknown accounts {unknown}; known: {sorted(names.values())}"}
+    after = [dict(a) for a in accounts]
+    for a in after:
+        for k, amt in changes.items():
+            if k.lower() == a["name"].lower():
+                a["balance"] = round(max(a["balance"] - float(amt), 0), 2)
+    p0, u0 = _penalty(accounts)
+    p1, u1 = _penalty(after)
+    gain = p0 - p1
+    lo, hi = round(gain * 0.6), round(gain * 1.2)
+    out = {"before": u0, "after": u1, "est_points": [min(lo, hi), max(lo, hi)],
+           "note": "Rough estimate from utilization bands. Real models differ; utilization has no memory, so it "
+                   "counts once the new balance reports on the statement date."}
+    if current_score:
+        s0 = int(float(current_score))
+        out["est_score"] = [max(300, min(850, s0 + out["est_points"][0])), max(300, min(850, s0 + out["est_points"][1]))]
+    return out
+
+
+# ---------- payment streaks & weekly check-in ----------
+
+def past_due_dates(day, today, n):
+    """The last n due dates strictly before today, newest first."""
+    if not day:
+        return []
+    out, y, m = [], today.year, today.month
+    while len(out) < n:
+        d = date(y, m, min(day, calendar.monthrange(y, m)[1]))
+        if d < today:
+            out.append(d)
+        y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+    return out
+
+
+def paid_in_cycle(txns, account, due):
+    start = due - timedelta(days=31)
+    return any(t["kind"] == "payment" and (t.get("account") or "").lower() == account.lower()
+               and start < date.fromisoformat(t["date"]) <= due for t in txns)
+
+
+def streaks(accounts, txns, today=None):
+    """Consecutive on-time months per card (a payment landed in each cycle before its due date)."""
+    today = today or date.today()
+    out = {}
+    for a in accounts:
+        if a["kind"] != "credit" or not a.get("due_day"):
+            continue
+        n = 0
+        for due in past_due_dates(a["due_day"], today, 24):
+            if not paid_in_cycle(txns, a["name"], due):
+                break
+            n += 1
+        out[a["name"]] = n
+    return out
+
+
+def checkin(accounts, txns, today=None, status=None):
+    """Deterministic weekly check-in message."""
+    today = today or date.today()
+    def spent(first, last):  # inclusive day offsets back from today
+        lo, hi = (today - timedelta(days=last)).isoformat(), (today - timedelta(days=first)).isoformat()
+        return sum(t["amount"] for t in txns if t["kind"] == "purchase" and lo <= t["date"] <= hi)
+    this, last = spent(0, 6), spent(7, 13)
+    lines = [f"🦃 Weekly check-in: you spent ${this:,.2f} this week"
+             + (f" ({'up' if this > last else 'down'} ${abs(this - last):,.2f} vs last week)" if last else "") + "."]
+    for a in accounts:
+        due = next_day_of_month(a.get("due_day"), today)
+        if a["kind"] == "credit" and a["balance"] > 0 and due and (due - today).days <= 7:
+            lines.append(f"• {a['name']} due {due:%a %b %d}: balance ${a['balance']:,.2f}")
+    st = streaks(accounts, txns, today)
+    if st:
+        best = max(st.values())
+        lines.append(f"🔥 On-time streak: {min(st.values())} month(s) on every card" + (f" (best {best})" if best else "") + ".")
+    top = next((x for x in plan(accounts, txns, today, status) if x["type"] not in ("keep_old", "autopay")), None)
+    if top:
+        lines.append(f"This week's one move: {top['title']}.")
+    lines.append("Reply with anything I missed (purchases, payments, paychecks).")
+    return "\n".join(lines)
+
+
+def summary(accounts, txns, today=None, status=None):
     today = today or date.today()
     since = (today - timedelta(days=30)).isoformat()
     spend = defaultdict(float)
@@ -152,10 +267,11 @@ def summary(accounts, txns, today=None):
         if t["kind"] == "purchase" and t["date"] >= since:
             spend[t.get("category") or "other"] += t["amount"]
     return {"today": today.isoformat(), "utilization": utilization(accounts),
-            "subscriptions": subscriptions(txns, today), "income_30d": monthly_income(txns, today),
+            "subscriptions": subscriptions(txns, today, status), "streaks": streaks(accounts, txns, today),
+            "income_30d": monthly_income(txns, today),
             "spend_30d": round(sum(spend.values()), 2),
             "spend_by_category_30d": {k: round(v, 2) for k, v in sorted(spend.items(), key=lambda kv: -kv[1])},
             "accounts": [{**a, "next_due": str(next_day_of_month(a.get("due_day"), today) or ""),
                           "next_statement": str(next_day_of_month(a.get("statement_day"), today) or "")}
                          for a in accounts],
-            "plan": plan(accounts, txns, today)}
+            "plan": plan(accounts, txns, today, status)}

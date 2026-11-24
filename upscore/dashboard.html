@@ -25,6 +25,9 @@
   .me { align-self:flex-end; background:var(--acc); color:#fff } .bot { align-self:flex-start; background:var(--line) }
   form { display:flex; gap:8px } input { flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--fg); font:inherit }
   button { padding:10px 16px; border-radius:10px; border:0; background:var(--acc); color:#fff; font:inherit; cursor:pointer }
+  .row { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap } .ghost { background:transparent; border:1px solid var(--line); color:var(--fg) }
+  #chart { width:100%; height:150px; display:block } #chart text { fill:var(--mut); font-size:11px }
+  .streak { font-size:22px; font-weight:700 }
   @media (max-width:760px) { main { grid-template-columns:1fr } }
 </style>
 </head>
@@ -46,6 +49,16 @@
   </section>
 
   <section class="card wide">
+    <h2>Credit score</h2>
+    <div style="display:flex;gap:24px;align-items:baseline;flex-wrap:wrap">
+      <div><span class="big" id="score">–</span> <span class="mut" id="scoredelta"></span></div>
+      <div><span class="streak" id="streak">🔥 0</span> <span class="mut">month on-time streak</span></div>
+    </div>
+    <svg id="chart" role="img" aria-label="Credit score history"></svg>
+    <div class="mut" id="chartnote">Tell me your score whenever you check it ("my score is 655") and I'll chart it.</div>
+  </section>
+
+  <section class="card wide">
     <h2>Your pathway</h2>
     <ol id="plan"></ol>
   </section>
@@ -64,6 +77,12 @@
     <h2>Talk to Upscore</h2>
     <div id="log"></div>
     <form id="f"><input id="q" placeholder="e.g. spent $42 on dinner with my Amex" autocomplete="off"><button>Send</button></form>
+    <div class="row">
+      <label class="ghost" style="padding:8px 12px;border-radius:10px;cursor:pointer">📎 Statement / receipt
+        <input id="file" type="file" accept="image/*,application/pdf" hidden></label>
+      <button class="ghost" type="button" id="sim">🧮 What if I pay…</button>
+      <button class="ghost" type="button" id="uncle">🦃 Uncle Gary mode</button>
+    </div>
   </section>
 
   <section class="card">
@@ -97,6 +116,17 @@ async function refresh() {
   if (d.profile && d.profile.credit_score) $('sub').textContent = `score ${d.profile.credit_score}` + (d.profile.goal ? ` → goal ${d.profile.goal}` : '');
   if (d.inbox) $('sub').textContent += ` · forward receipts to ${d.inbox}`;
 
+  const sc = d.scores || [], st = Object.values(d.streaks || {});
+  $('streak').textContent = '🔥 ' + (st.length ? Math.min(...st) : 0);
+  if (sc.length) {
+    const last = sc[sc.length - 1].score, first = sc[0].score;
+    $('score').textContent = last;
+    $('scoredelta').textContent = sc.length > 1 ? `${last >= first ? '+' : ''}${last - first} since ${sc[0].date}` : '';
+    drawChart(sc, parseInt((d.profile.goal || '').match(/\d{3}/)) || null);
+    $('chartnote').textContent = d.profile.goal ? `Goal: ${d.profile.goal}` : '';
+  } else if (d.profile.credit_score) $('score').textContent = d.profile.credit_score;
+  $('uncle').textContent = d.profile.persona === 'uncle' ? '🦃 Uncle Gary: ON' : '🦃 Uncle Gary mode';
+
   $('plan').replaceChildren(...d.plan.map(a => { const li = el('li', a.title); li.append(el('small', a.why)); return li; }));
   $('accts').replaceChildren(...d.accounts.filter(a => a.kind === 'credit').map(a => row([
     [a.name], [money(a.balance), 'n'], [pct(d.utilization.per_card[a.name]), 'n ' + cls(d.utilization.per_card[a.name])],
@@ -107,16 +137,43 @@ async function refresh() {
     [(t.kind === 'purchase' ? '-' : '+') + money(t.amount), 'n']])));
 }
 
-function say(text, who) { const m = el('div', text, 'msg ' + who); $('log').append(m); $('log').scrollTop = 1e9; return m; }
-$('f').onsubmit = async e => {
-  e.preventDefault(); const text = $('q').value.trim(); if (!text) return;
-  $('q').value = ''; say(text, 'me'); const wait = say('…', 'bot');
+function drawChart(sc, goal) {
+  const svg = $('chart'), W = svg.clientWidth || 600, H = 150, P = 24, NS = 'http://www.w3.org/2000/svg';
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const ys = sc.map(s => s.score).concat(goal ? [goal] : []);
+  const lo = Math.min(...ys) - 15, hi = Math.max(...ys) + 15;
+  const x = i => P + (sc.length < 2 ? (W - 2 * P) / 2 : i * (W - 2 * P) / (sc.length - 1));
+  const y = v => H - P - (v - lo) / (hi - lo) * (H - 2 * P);
+  const mk = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+  const kids = [];
+  if (goal) kids.push(mk('line', {x1: P, x2: W - P, y1: y(goal), y2: y(goal), stroke: 'var(--good)', 'stroke-dasharray': '4 4'}),
+                     mk('text', {x: W - P, y: y(goal) - 4, 'text-anchor': 'end'}, 'goal ' + goal));
+  kids.push(mk('polyline', {points: sc.map((s, i) => `${x(i)},${y(s.score)}`).join(' '), fill: 'none', stroke: 'var(--acc)', 'stroke-width': 2.5}));
+  sc.forEach((s, i) => { kids.push(mk('circle', {cx: x(i), cy: y(s.score), r: 3.5, fill: 'var(--acc)'}));
+    if (i === 0 || i === sc.length - 1) kids.push(mk('text', {x: x(i), y: H - 6, 'text-anchor': i ? 'end' : 'start'}, s.date)); });
+  svg.replaceChildren(...kids);
+}
+
+async function send(text, files) {
+  if (text) say(text, 'me'); files?.forEach(f => say('📎 ' + f.name, 'me'));
+  const wait = say('…', 'bot');
   try {
-    const r = await fetch('/api/chat', {method: 'POST', headers: {...H, 'Content-Type': 'application/json'}, body: JSON.stringify({text})});
+    const r = await fetch('/api/chat', {method: 'POST', headers: {...H, 'Content-Type': 'application/json'}, body: JSON.stringify({text, files})});
     const d = await r.json(); wait.textContent = d.reply || ('Error: ' + d.error);
   } catch (err) { wait.textContent = 'Error: ' + err; }
   refresh();
+}
+$('file').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  const data = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(f); });
+  e.target.value = '';
+  send($('q').value.trim(), [{name: f.name, mime: f.type || 'application/octet-stream', data}]); $('q').value = '';
 };
+$('sim').onclick = () => { $('q').value = 'What if I pay $500 on '; $('q').focus(); };
+$('uncle').onclick = () => send($('uncle').textContent.includes('ON') ? 'Turn off Uncle Gary mode' : 'Turn on Uncle Gary mode, then roast my spending');
+
+function say(text, who) { const m = el('div', text, 'msg ' + who); $('log').append(m); $('log').scrollTop = 1e9; return m; }
+$('f').onsubmit = e => { e.preventDefault(); const text = $('q').value.trim(); if (!text) return; $('q').value = ''; send(text); };
 refresh(); setInterval(refresh, 15000);
 </script>
 </body>

@@ -1,4 +1,5 @@
 """Entry point: starts channel pollers + a tiny dashboard/chat web server.  python3 -m upscore.server"""
+import base64
 import hmac
 import json
 import logging
@@ -40,8 +41,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, PAGE, "text/html; charset=utf-8")
         if path == "/api/summary":
             accounts, txns = agent.load()
-            out = {**credit.summary(accounts, txns), "profile": agent.profile(), "recent": txns[:15],
-                   "inbox": channels.INBOX or None}
+            out = {**credit.summary(accounts, txns, status=db.sub_status()), "profile": agent.profile(),
+                   "recent": txns[:15], "inbox": channels.INBOX or None,
+                   "scores": db.q("SELECT date, score FROM scores ORDER BY date")}
             return self.send(200, json.dumps(out, default=str))
         self.send(404, "not found", "text/plain")
 
@@ -51,13 +53,20 @@ class Handler(BaseHTTPRequestHandler):
         if urlparse(self.path).path != "/api/chat":
             return self.send(404, "not found", "text/plain")
         n = int(self.headers.get("Content-Length", 0))
-        if n > 50_000:
+        if n > 15_000_000:  # base64 of a 10 MB file
             return self.send(413, "too large", "text/plain")
-        text = (json.loads(self.rfile.read(n) or b"{}").get("text") or "").strip()
-        if not text:
+        body = json.loads(self.rfile.read(n) or b"{}")
+        text = (body.get("text") or "").strip()
+        try:  # files: [{name, mime, data: base64}] from the dashboard's statement upload
+            files = [(f["name"], f["mime"], base64.b64decode(f["data"])) for f in body.get("files", [])]
+        except (KeyError, TypeError, ValueError):
+            return self.send(400, json.dumps({"error": "bad file payload"}))
+        if not text and not files:
             return self.send(400, json.dumps({"error": "empty"}))
         try:
-            return self.send(200, json.dumps({"reply": agent.respond("web", text, "web")}))
+            return self.send(200, json.dumps({"reply": agent.respond("web", text, "web", files)}))
+        except ValueError as e:  # unsupported or oversized file
+            return self.send(400, json.dumps({"error": str(e)}))
         except Exception as e:
             logging.exception("chat failed")
             return self.send(502, json.dumps({"error": str(e)}))

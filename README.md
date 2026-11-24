@@ -14,6 +14,14 @@ web dashboard / CLI ──────────────┘   (Muse Ember 
 - **Statement-date aware.** It tells you what to pay *before the statement closes* so the card reports under 10%.
 - **Python standard library only.** There's nothing to `pip install`.
 
+### Features
+- **Statements and receipts as images or PDFs.** Send a photo on Telegram or upload one on the dashboard. Muse Spark reads it and records the card and its transactions.
+- **What-if simulator.** "What if I pay $800 on Chase?" returns utilization before and after plus an estimated score range.
+- **Weekly check-in and streaks.** Every Sunday you get spend vs. last week, upcoming due dates, your on-time streak and the one move to make. If a due date passes with no payment logged, it alerts you while there's still time.
+- **Subscription cancel helper.** It drafts the cancellation email in AgentMail and sends it only after you say so, then drops that subscription from your totals.
+- **🦃 Uncle Gary mode.** Your nosy Thanksgiving uncle roasts your spending, then gives you the real plan anyway.
+- **Score history chart.** Tell it your score whenever you check, and it charts progress toward your goal.
+
 ## Run locally (with demo data)
 ```bash
 UPSCORE_DB=/tmp/demo.db python3 -m upscore.seed
@@ -48,9 +56,11 @@ Say these in Slack, Telegram, the dashboard, or an email to the agent's inbox:
 - "my chase freedom limit is 2000, statement closes the 3rd, due the 28th, balance 1450"
 - "spent 42 on dinner with amex"  ·  "got paid 2400"  ·  "paid 300 on chase"
 - "my score is 642, I want 720 by June"
-- "what should I do this week?"
+- "what should I do this week?"  ·  "what if I pay 800 on chase before the statement?"
+- "cancel netflix for me"  ·  "turn on uncle gary mode"  ·  (send a photo of your statement)
 
 ## Not yet supported
-iMessage needs a macOS relay, and WhatsApp needs Meta Business API approval. Both could plug into `agent.respond()` the same way Telegram does.
+- iMessage needs a macOS relay, and WhatsApp needs Meta Business API approval. Both could plug into `agent.respond()` the same way Telegram does.
+- Files sent in Slack: Slack serves them from `files.slack.com`, which the connector doesn't proxy, so they only work when `SLACK_BOT_TOKEN` is set. Email attachments: the AgentMail connector doesn't allow the attachments endpoint. Use Telegram or the dashboard for statements.
 
 *Upscore gives educational guidance based on public credit-scoring factors. It is not financial advice.*

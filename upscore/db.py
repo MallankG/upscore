@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS txns (
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY, chat TEXT, role TEXT, content TEXT);
+CREATE TABLE IF NOT EXISTS scores (date TEXT PRIMARY KEY, score INTEGER NOT NULL);  -- one per day, last wins
 """
 
 
@@ -75,6 +76,19 @@ def kv_get(key, default=None):
 
 def kv_set(key, value):
     run("INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
+
+
+def log_score(score, date_=None):
+    score = int(float(score))
+    if not 300 <= score <= 850:
+        raise ValueError("credit scores run 300-850")
+    run("INSERT INTO scores(date, score) VALUES(?,?) ON CONFLICT(date) DO UPDATE SET score=excluded.score",
+        (date_ or date.today().isoformat(), score))
+
+
+def sub_status():
+    """merchant(lowercase) -> 'cancelled' | 'active' as set by the user."""
+    return {r["key"][4:]: r["value"] for r in q("SELECT key, value FROM kv WHERE key LIKE 'sub:%'")}
 
 
 # --- domain writes (used by agent tools) ---

@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 import urllib.parse
+import urllib.request
 from datetime import date
 
 from . import agent, credit, db
@@ -84,13 +85,27 @@ def send_telegram(text):
     return False
 
 
+def telegram_file(msg):
+    """(name, mime, bytes) for a photo (largest size) or document."""
+    if msg.get("photo"):
+        fid, name, mime = msg["photo"][-1]["file_id"], "photo.jpg", "image/jpeg"
+    else:
+        d = msg["document"]
+        fid, name, mime = d["file_id"], d.get("file_name", "file"), d.get("mime_type", "application/octet-stream")
+    path = tg("getFile", {"file_id": fid})["result"]["file_path"]
+    file_base = TG_BASE.replace("/bot", "/file/bot", 1)
+    with urllib.request.urlopen(f"{file_base}/{path}", timeout=60) as r:
+        return name, mime, r.read(agent.MAX_FILE_BYTES + 1)
+
+
 def poll_telegram_once():
     offset = int(db.kv_get("telegram_offset", 0))
     for u in tg("getUpdates", {"offset": offset, "timeout": 50}).get("result", []):
         db.kv_set("telegram_offset", u["update_id"] + 1)
         msg = u.get("message") or {}
-        text, chat_id = msg.get("text"), (msg.get("chat") or {}).get("id")
-        if not text or not chat_id:
+        text, chat_id = msg.get("text") or msg.get("caption") or "", (msg.get("chat") or {}).get("id")
+        has_file = msg.get("photo") or msg.get("document")
+        if not (text or has_file) or not chat_id:
             continue
         owner = db.kv_get("telegram_chat_id") or os.environ.get("TELEGRAM_CHAT_ID")
         if not owner:  # first person to /start the bot owns it: this is a personal agent
@@ -103,7 +118,12 @@ def poll_telegram_once():
         if text.strip() == "/start":
             text = "Hi! Introduce yourself briefly and tell me what you can do and what info you need from me."
         tg("sendChatAction", {"chat_id": chat_id, "action": "typing"})
-        tg("sendMessage", {"chat_id": chat_id, "text": agent.respond("telegram", text, "telegram")[:4000]})
+        try:
+            files = [telegram_file(msg)] if has_file else []
+            reply = agent.respond("telegram", text, "telegram", files)
+        except ValueError as e:  # unsupported/oversized file
+            reply = str(e)
+        tg("sendMessage", {"chat_id": chat_id, "text": reply[:4000]})
 
 
 # ---------- Slack ----------
@@ -125,6 +145,16 @@ def send_slack(text):
     return False
 
 
+def slack_file(f):
+    # ponytail: Slack serves files from files.slack.com, which the connector gateway doesn't proxy;
+    # downloads need SLACK_BOT_TOKEN (files:read). Upload via Telegram or the dashboard otherwise.
+    if not SLACK_TOKEN:
+        raise PermissionError("I can't open Slack files through the connector yet. Upload it on the dashboard or send it on Telegram.")
+    req = urllib.request.Request(f["url_private_download"], headers={"Authorization": f"Bearer {SLACK_TOKEN}"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return f.get("name", "file"), f.get("mimetype", "application/octet-stream"), r.read(agent.MAX_FILE_BYTES + 1)
+
+
 def poll_slack_once():
     oldest = db.kv_get("slack_oldest")
     if oldest is None:  # first run: start from now, don't replay channel history
@@ -133,9 +163,12 @@ def poll_slack_once():
     msgs = slack("conversations.history", params={"channel": SLACK_CHANNEL, "oldest": oldest, "limit": 50}).get("messages", [])
     for m in sorted(msgs, key=lambda m: float(m["ts"])):
         db.kv_set("slack_oldest", m["ts"])
-        if m.get("bot_id") or m.get("subtype") or not m.get("text"):
+        if m.get("bot_id") or (m.get("subtype") not in (None, "file_share")) or not (m.get("text") or m.get("files")):
             continue  # skip our own replies, joins, edits
-        reply = agent.respond("slack", m["text"], "slack")
+        try:
+            reply = agent.respond("slack", m.get("text", ""), "slack", [slack_file(f) for f in m.get("files", [])])
+        except (ValueError, PermissionError) as e:
+            reply = str(e)
         slack("chat.postMessage", {"channel": SLACK_CHANNEL, "text": reply[:3900]})
 
 
@@ -151,11 +184,43 @@ def notify(text):
     return sent
 
 
-def run_reminders_once(today=None):
-    accounts = db.q("SELECT * FROM accounts")
-    for key, text in credit.reminders(accounts, today or date.today()):
+CHECKIN_WEEKDAY = int(os.environ.get("CHECKIN_WEEKDAY", "6"))  # 0=Mon .. 6=Sun
+CHECKIN_HOUR = int(os.environ.get("CHECKIN_HOUR", "10"))
+
+
+def run_reminders_once(now=None):
+    from datetime import datetime
+    now = now or datetime.now()
+    accounts, txns = agent.load()
+    for key, text in credit.reminders(accounts, now.date(), txns=txns):
         if not db.kv_get("remind:" + key) and notify(text):
             db.kv_set("remind:" + key, 1)
+    week = "checkin:%d-W%02d" % now.isocalendar()[:2]
+    if now.weekday() == CHECKIN_WEEKDAY and now.hour >= CHECKIN_HOUR and not db.kv_get(week) and accounts:
+        if notify(credit.checkin(accounts, txns, now.date(), db.sub_status())):
+            db.kv_set(week, 1)
+
+
+# ---------- Subscription cancellation (AgentMail drafts: nothing is sent without the user's OK) ----------
+
+def create_cancel_draft(merchant, to, subject, body):
+    if not (AGENTMAIL_BASE and INBOX):
+        return {"error": "AgentMail isn't configured, so here's the text to send yourself.", "to": to, "subject": subject, "body": body}
+    d = am("POST", inbox_path() + "/drafts", {"to": [to], "subject": subject, "text": body})
+    db.kv_set("draft:" + merchant.strip().lower(), d.get("draft_id"))
+    return {"draft_id": d.get("draft_id"), "to": to, "subject": subject, "body": body,
+            "next": "Show this to the user and ask them to confirm before sending."}
+
+
+def send_cancel_draft(merchant):
+    key = merchant.strip().lower()
+    draft = db.kv_get("draft:" + key)
+    if not draft:
+        return {"error": f"no draft for {merchant}; create one first"}
+    am("POST", f"{inbox_path()}/drafts/{urllib.parse.quote(draft, safe='')}/send", {})
+    db.run("DELETE FROM kv WHERE key=?", ("draft:" + key,))
+    db.kv_set("sub:" + key, "cancelled")
+    return {"sent": True, "marked": "cancelled"}
 
 
 # ---------- Sprite keep-alive ----------
@@ -191,7 +256,7 @@ def enabled():
         out.append((poll_telegram_once, 0, "telegram"))  # long-poll blocks itself
     if SLACK_BASE and SLACK_CHANNEL:
         out.append((poll_slack_once, SLACK_POLL_SECS, "slack"))
-    out.append((run_reminders_once, 3600, "reminders"))
+    out.append((run_reminders_once, 900, "reminders"))
     if os.path.exists(SPRITE_SOCK) and os.environ.get("KEEP_AWAKE", "1") == "1":
         out.append((keepalive_once, 60, "keepalive"))
     return out

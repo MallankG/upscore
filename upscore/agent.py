@@ -5,6 +5,7 @@ built for high-volume tool calls) handles email extraction. Inside a Sprite LLM_
   https://api.sprites.dev/v1/gateway/meta/<connection_id>/v1
 and no key is needed. Outside a Sprite (local dev), set LLM_API_KEY. Any OpenAI-compatible endpoint works.
 """
+import base64
 import json
 import os
 import threading
@@ -40,6 +41,9 @@ and turning that into a concrete, dated plan.
 Rules:
 - Record everything the user tells you with tools: purchases, income, payments, card limits, balances,
   statement and due days. Don't ask for confirmation of obvious things, just record and say what you saved.
+- When given an image or PDF (card statement, receipt, banking app screenshot), read it carefully and record
+  the card (limit, balance, statement/due day, minimum payment) with upsert_account and every transaction
+  with add_transaction. Then say what you captured in one or two lines.
 - When given an email (bank alert, receipt, statement, subscription notice), extract every transaction or
   account fact it contains and record it. Card payment confirmations are kind=payment. Paychecks/deposits are
   kind=income. Mark subscriptions/renewals recurring=true. Use the card/account name if mentioned (e.g. "Chase Freedom").
@@ -50,6 +54,19 @@ Rules:
 - You give educational guidance based on public credit-scoring factors, not licensed financial advice. Don't pick investments.
 - Keep replies short and chat-friendly (this is read on a phone). Plain text, no markdown tables.
 Today is {today}."""
+
+UNCLE = """
+PERSONA: You are "Uncle Gary", the nosy uncle at Thanksgiving dinner who has OPINIONS about money.
+Roast the user's spending with turkey, stuffing and pie metaphors, pass-the-gravy asides, and
+"back in my day" energy. Keep it affectionate, never cruel, never about anything but money habits.
+Every number still comes from tools, and you still give the real dated plan. One roast line, then the help."""
+
+
+def system_prompt():
+    p = profile()
+    extra = UNCLE if p.get("persona") == "uncle" else ""
+    return SYSTEM.format(today=date.today().isoformat()) + extra
+
 
 TOOLS = [
     {"name": "add_transaction", "description": "Record a purchase, payment to a card, income, or refund.",
@@ -71,13 +88,31 @@ TOOLS = [
          "due_day": {"type": "integer", "description": "Day of month payment is due (1-31)"},
          "min_payment": {"type": "number"}, "autopay": {"type": "boolean"}},
          "required": ["name"]}},
-    {"name": "set_profile", "description": "Save a user fact, e.g. key=credit_score value=640, key=goal value='700 by June'.",
+    {"name": "set_profile", "description": "Save a user fact, e.g. key=credit_score value=640 (also logged to score history), "
+                                           "key=goal value='700 by June', key=persona value=uncle|normal (Uncle Gary roast mode on/off).",
      "parameters": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
                     "required": ["key", "value"]}},
     {"name": "get_summary", "description": "Accounts, utilization, 30-day spend by category, income, subscriptions.",
      "parameters": {"type": "object", "properties": {}}},
     {"name": "get_plan", "description": "Prioritized dated credit-improvement actions computed from the data.",
      "parameters": {"type": "object", "properties": {}}},
+    {"name": "simulate", "description": "What-if: predicted utilization and rough score change if the user pays down "
+                                        "(positive amount) or charges (negative amount) on cards before statements close.",
+     "parameters": {"type": "object", "properties": {"changes": {"type": "array", "items": {"type": "object", "properties": {
+         "account": {"type": "string"}, "amount": {"type": "number"}}, "required": ["account", "amount"]}}},
+         "required": ["changes"]}},
+    {"name": "draft_cancellation", "description": "Create an email DRAFT cancelling a subscription (not sent). Show the user "
+                                                  "the draft and ask them to confirm before sending. Include account email/name if known.",
+     "parameters": {"type": "object", "properties": {
+         "merchant": {"type": "string"}, "to": {"type": "string", "description": "Merchant support/cancellation email"},
+         "subject": {"type": "string"}, "body": {"type": "string"}}, "required": ["merchant", "to", "subject", "body"]}},
+    {"name": "send_cancellation", "description": "Send a cancellation draft. ONLY call when the user's latest message explicitly "
+                                                 "says to send it.",
+     "parameters": {"type": "object", "properties": {"merchant": {"type": "string"}}, "required": ["merchant"]}},
+    {"name": "mark_subscription", "description": "Mark a subscription cancelled (status=cancelled) or active again (status=active).",
+     "parameters": {"type": "object", "properties": {"merchant": {"type": "string"},
+                                                     "status": {"type": "string", "enum": ["cancelled", "active"]}},
+                    "required": ["merchant", "status"]}},
     {"name": "recent_transactions", "description": "List recent transactions.",
      "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
 ]
@@ -99,11 +134,25 @@ def call_tool(name, args, source):
         return db.upsert_account(**{k: v for k, v in args.items() if k in db.upsert_account.__code__.co_varnames})
     if name == "set_profile":
         db.kv_set("profile:" + args["key"], args["value"])
+        if args["key"] == "credit_score":
+            db.log_score(args["value"])
+        return {"ok": True}
+    if name == "simulate":
+        accounts, _ = load()
+        return credit.simulate(accounts, {c["account"]: c["amount"] for c in args["changes"]}, profile().get("credit_score"))
+    if name == "draft_cancellation":
+        from . import channels
+        return channels.create_cancel_draft(args["merchant"], args["to"], args["subject"], args["body"])
+    if name == "send_cancellation":
+        from . import channels
+        return channels.send_cancel_draft(args["merchant"])
+    if name == "mark_subscription":
+        db.kv_set("sub:" + args["merchant"].strip().lower(), args["status"])
         return {"ok": True}
     if name == "get_summary":
-        return {**credit.summary(*load()), "profile": profile()}
+        return {**credit.summary(*load(), status=db.sub_status()), "profile": profile()}
     if name == "get_plan":
-        return {"plan": credit.plan(*load()), "profile": profile()}
+        return {"plan": credit.plan(*load(), status=db.sub_status()), "profile": profile()}
     if name == "recent_transactions":
         return db.q("SELECT * FROM txns ORDER BY date DESC, id DESC LIMIT ?", (int(args.get("limit") or 20),))
     return {"error": f"unknown tool {name}"}
@@ -118,12 +167,36 @@ def llm(messages, model=None):
     return http_json("POST", LLM_BASE_URL + "/chat/completions", body, headers)["choices"][0]["message"]
 
 
-def respond(chat, text, source):
-    """One agent turn. `chat` keys conversation history (e.g. 'telegram', 'email', 'web')."""
+MAX_FILE_BYTES = 10_000_000
+
+
+def user_content(text, files):
+    """Chat Completions content parts: images as image_url, PDFs as file parts (both base64 data URLs)."""
+    if not files:
+        return text
+    parts = [{"type": "text", "text": text or "Here's a statement/receipt. Record everything in it."}]
+    for name, mime, data in files:
+        if len(data) > MAX_FILE_BYTES:
+            raise ValueError(f"{name} is over 10 MB")
+        url = f"data:{mime};base64,{base64.b64encode(data).decode()}"
+        if mime.startswith("image/"):
+            parts.append({"type": "image_url", "image_url": {"url": url}})
+        elif mime == "application/pdf":
+            parts.append({"type": "file", "file": {"filename": name, "file_data": url}})
+        else:
+            raise ValueError(f"unsupported file type {mime}: send an image or PDF")
+    return parts
+
+
+def respond(chat, text, source, files=()):
+    """One agent turn. `chat` keys conversation history (e.g. 'telegram', 'email', 'web').
+    `files` is a list of (name, mime, bytes) images/PDFs."""
     with TURN_LOCK:
         past = db.q("SELECT role, content FROM history WHERE chat=? ORDER BY id DESC LIMIT ?", (chat, HISTORY_TURNS))[::-1]
-        messages = [{"role": "system", "content": SYSTEM.format(today=date.today().isoformat())}, *past,
-                    {"role": "user", "content": text}]
+        messages = [{"role": "system", "content": system_prompt()}, *past,
+                    {"role": "user", "content": user_content(text, files)}]
+        if files:  # history keeps text only; the file itself is not replayed
+            text = (text + " " if text else "") + " ".join(f"[attached {n}]" for n, _, _ in files)
         reply = "Sorry, I got stuck. Try again?"
         for _ in range(8):
             msg = llm(messages, LLM_FAST_MODEL if source in FAST_SOURCES else LLM_MODEL)
