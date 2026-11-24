@@ -176,11 +176,11 @@ class IntegrationTest(unittest.TestCase):
                      call("send_cancellation", {"merchant": "Netflix"}),
                      {"role": "assistant", "content": "Sent."}]
         self.assertEqual(self.agent.respond("web", "cancel netflix", "web"), "Draft ready. Send it?")
-        self.assertEqual(self.posts("/drafts")[0]["to"], ["help@netflix.com"])
         self.assertFalse(self.posts("/send"))  # nothing sent without confirmation
         self.assertEqual(self.agent.respond("web", "yes send it", "web"),
                          "Sent.\n\n🏆 Achievement unlocked: Snip snip (+60 XP)")
-        self.assertTrue(self.posts("/drafts/d1/send"))
+        sent = self.posts("/messages/send")
+        self.assertEqual(sent[-1], {"to": ["help@netflix.com"], "subject": "Cancel my subscription", "text": "Please cancel."})
         subs = self.agent.call_tool("get_summary", {}, "web")["subscriptions"]
         self.assertNotIn("Netflix", [x["merchant"] for x in subs])
 

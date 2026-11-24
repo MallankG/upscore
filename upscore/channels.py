@@ -1,4 +1,5 @@
 """Inbound/outbound channels: AgentMail (via Sprites connector), Telegram, and the reminder scheduler."""
+import json
 import logging
 import os
 import subprocess
@@ -208,20 +209,23 @@ def run_reminders_once(now=None):
 # ---------- Subscription cancellation (AgentMail drafts: nothing is sent without the user's OK) ----------
 
 def create_cancel_draft(merchant, to, subject, body):
+    """Stores the pending email locally (works with inbox-scoped AgentMail keys that lack draft permissions)."""
+    draft = {"to": to, "subject": subject, "body": body}
+    db.kv_set("draft:" + merchant.strip().lower(), json.dumps(draft))
     if not (AGENTMAIL_BASE and INBOX):
-        return {"error": "AgentMail isn't configured, so here's the text to send yourself.", "to": to, "subject": subject, "body": body}
-    d = am("POST", inbox_path() + "/drafts", {"to": [to], "subject": subject, "text": body})
-    db.kv_set("draft:" + merchant.strip().lower(), d.get("draft_id"))
-    return {"draft_id": d.get("draft_id"), "to": to, "subject": subject, "body": body,
-            "next": "Show this to the user and ask them to confirm before sending."}
+        return {**draft, "note": "AgentMail isn't configured, so the user must send this themselves."}
+    return {**draft, "next": "Show this to the user and ask them to confirm before sending."}
 
 
 def send_cancel_draft(merchant):
     key = merchant.strip().lower()
-    draft = db.kv_get("draft:" + key)
-    if not draft:
+    raw = db.kv_get("draft:" + key)
+    if not raw:
         return {"error": f"no draft for {merchant}; create one first"}
-    am("POST", f"{inbox_path()}/drafts/{urllib.parse.quote(draft, safe='')}/send", {})
+    if not (AGENTMAIL_BASE and INBOX):
+        return {"error": "AgentMail isn't configured; the user has to send it themselves"}
+    d = json.loads(raw)
+    am("POST", inbox_path() + "/messages/send", {"to": [d["to"]], "subject": d["subject"], "text": d["body"]})
     db.run("DELETE FROM kv WHERE key=?", ("draft:" + key,))
     db.kv_set("sub:" + key, "cancelled")
     return {"sent": True, "marked": "cancelled"}
