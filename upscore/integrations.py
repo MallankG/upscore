@@ -20,7 +20,7 @@ from .agent import http_json
 
 log = logging.getLogger("upscore")
 PUSHOVER_USER = os.environ.get("PUSHOVER_USER", "")      # your Pushover user key (not a secret; the app token is in the connector)
-PINECONE_INDEX = os.environ.get("PINECONE_INDEX", "upscore")
+PINECONE_INDEX = os.environ.get("PINECONE_INDEX", "upscore-vectors")
 BOX_FOLDER = os.environ.get("BOX_FOLDER", "Upscore statements")
 
 
@@ -129,7 +129,7 @@ def web_search(query, n=5):
 
 # ---------- Pinecone: semantic memory over transactions ----------
 # The Sprites connector forwards /embed, /indexes (list) and per-index vector routes, but not index creation:
-# create a serverless index named PINECONE_INDEX (dimension 1024, cosine) once in the Pinecone console.
+# create a classic serverless index (dense, 1024, cosine, no embedding model or document schema) named PINECONE_INDEX once in the Pinecone console.
 EMBED_MODEL = "multilingual-e5-large"  # Pinecone-hosted, 1024 dims
 
 

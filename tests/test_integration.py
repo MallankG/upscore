@@ -58,7 +58,7 @@ class Mock(BaseHTTPRequestHandler):
             self.end_headers()
             return self.wfile.write(b)
         if self.path == "/indexes":
-            return self.reply({"indexes": [{"name": "upscore", "dimension": 1024}]})
+            return self.reply({"indexes": [{"name": "upscore-vectors", "dimension": 1024}]})
         if self.path.startswith("/banking/accounts"):
             return self.reply({"accounts": [{"id": "a1", "name": "Era Visa", "type": "credit_card",
                                              "currentBalance": -300.0, "creditLimit": 3000}]})
@@ -107,7 +107,7 @@ class Mock(BaseHTTPRequestHandler):
             return self.reply({"data": [{"values": [0.1] * 1024} for _ in body["inputs"]]})
         if self.path.endswith("/vectors/upsert"):
             return self.reply({"upsertedCount": len(body["vectors"])})
-        if self.path.endswith("/indexes/upscore/query"):
+        if self.path.endswith("/indexes/upscore-vectors/query"):
             return self.reply({"matches": [{"id": "t1", "score": 0.91, "metadata": {"text": "Blue Bottle coffee", "amount": 25.5}}]})
         if self.path == "/search":  # Tavily
             return self.reply({"answer": "Q4 2026: 5% on gas and EV charging", "results": [{"title": "Freedom Q4", "url": "https://x", "content": "5% gas"}]})
@@ -344,7 +344,7 @@ class IntegrationTest(unittest.TestCase):
         self.assertIn("5% on gas", self.agent.call_tool("web_search", {"query": "freedom q4"}, "web")["answer"])
         n = self.integ.pinecone_index_new()
         self.assertGreater(n, 0)
-        up = self.posts("/indexes/upscore/vectors/upsert")[0]
+        up = self.posts("/indexes/upscore-vectors/vectors/upsert")[0]
         self.assertEqual((up["namespace"], len(up["vectors"]), len(up["vectors"][0]["values"])), ("txns", n, 1024))
         self.assertIn("text", up["vectors"][0]["metadata"])
         self.assertEqual(self.integ.pinecone_index_new(), 0)  # nothing new
