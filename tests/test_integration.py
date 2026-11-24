@@ -203,8 +203,12 @@ class IntegrationTest(unittest.TestCase):
     def test_09_simulate_score_and_uncle_persona(self):
         self.agent.call_tool("upsert_account", {"name": "Sim Card", "credit_limit": 1000, "balance": 800}, "web")
         self.agent.call_tool("set_profile", {"key": "credit_score", "value": "650"}, "web")
-        sim = self.agent.call_tool("simulate", {"changes": [{"account": "sim card", "amount": 710}]}, "web")
+        sim = self.agent.call_tool("simulate", {"changes": [{"account": "sim card", "payment": 710}]}, "web")
         self.assertAlmostEqual(sim["after"]["per_card"]["Sim Card"], 0.09)
+        neg = self.agent.call_tool("simulate", {"changes": [{"account": "sim card", "payment": -710}]}, "web")
+        self.assertEqual(neg["after"], sim["after"])  # a negative "payment" is still a payment
+        more = self.agent.call_tool("simulate", {"changes": [{"account": "sim card", "new_charges": 100}]}, "web")
+        self.assertAlmostEqual(more["after"]["per_card"]["Sim Card"], 0.9)
         self.assertGreater(sim["est_score"][0], 650)
         self.assertEqual(self.db.q("SELECT score FROM scores")[-1]["score"], 650)
         self.assertNotIn("Uncle Gary", self.agent.system_prompt())

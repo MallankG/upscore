@@ -111,10 +111,13 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {}}},
     {"name": "get_plan", "description": "Prioritized dated credit-improvement actions computed from the data.",
      "parameters": {"type": "object", "properties": {}}},
-    {"name": "simulate", "description": "What-if: predicted utilization and rough score change if the user pays down "
-                                        "(positive amount) or charges (negative amount) on cards before statements close.",
+    {"name": "simulate", "description": "What-if: predicted utilization and rough score change if the user pays cards down "
+                                        "(and/or adds new charges) before statements close.",
      "parameters": {"type": "object", "properties": {"changes": {"type": "array", "items": {"type": "object", "properties": {
-         "account": {"type": "string"}, "amount": {"type": "number"}}, "required": ["account", "amount"]}}},
+         "account": {"type": "string"},
+         "payment": {"type": "number", "description": "Amount the user would pay toward the card, e.g. 1300"},
+         "new_charges": {"type": "number", "description": "Amount of new spending on the card, if any"}},
+         "required": ["account"]}}},
          "required": ["changes"]}},
     {"name": "draft_cancellation", "description": "Create an email DRAFT cancelling a subscription (not sent). Show the user "
                                                   "the draft and ask them to confirm before sending. Include account email/name if known.",
@@ -154,7 +157,10 @@ def call_tool(name, args, source):
         return {"ok": True}
     if name == "simulate":
         accounts, _ = load()
-        return credit.simulate(accounts, {c["account"]: c["amount"] for c in args["changes"]}, profile().get("credit_score"))
+        # signs ignored on purpose: small models often send a payment as a negative number
+        net = {c["account"]: abs(c.get("payment") or c.get("amount") or 0) - abs(c.get("new_charges") or 0)
+               for c in args["changes"]}
+        return credit.simulate(accounts, net, profile().get("credit_score"))
     if name == "draft_cancellation":
         from . import channels
         return channels.create_cancel_draft(args["merchant"], args["to"], args["subject"], args["body"])
