@@ -149,6 +149,8 @@ def _txn_text(t):
 
 
 def pinecone_ready():
+    if db.kv_get("pinecone:unsupported"):
+        return False
     if db.kv_get("pinecone:ready"):
         return True
     names = [i.get("name") for i in _pc("GET", "/indexes").get("indexes", [])]
@@ -172,9 +174,17 @@ def pinecone_index_new():
     budget.take("pinecone_upsert")
     texts = [_txn_text(t) for t in rows]
     vecs = _embed(texts, "passage")
-    _pc("POST", f"/indexes/{PINECONE_INDEX}/vectors/upsert", {"namespace": "txns", "vectors": [
-        {"id": f"t{t['id']}", "values": v, "metadata": {"text": txt, "date": t["date"], "amount": t["amount"], "kind": t["kind"]}}
-        for t, v, txt in zip(rows, vecs, texts)]})
+    try:
+        _pc("POST", f"/indexes/{PINECONE_INDEX}/vectors/upsert", {"namespace": "txns", "vectors": [
+            {"id": f"t{t['id']}", "values": v, "metadata": {"text": txt, "date": t["date"], "amount": t["amount"], "kind": t["kind"]}}
+            for t, v, txt in zip(rows, vecs, texts)]})
+    except RuntimeError as e:
+        if "document schema" not in str(e):
+            raise
+        # the Sprites connector can't reach the documents API, so a document-schema index can never take writes
+        log.warning("Pinecone index %r has a document schema the connector can't write to; semantic search is off", PINECONE_INDEX)
+        db.kv_set("pinecone:unsupported", 1)
+        return 0
     db.kv_set("pinecone:last_id", rows[-1]["id"])
     return len(rows)
 

@@ -381,5 +381,23 @@ class IntegrationTest(unittest.TestCase):
         self.assertGreaterEqual(self.channels.SLACK_POLL_SECS, 60)
 
 
+    def test_19_document_schema_index_disables_semantic_search_once(self):
+        from unittest import mock
+        self.db.run("DELETE FROM kv WHERE key LIKE 'pinecone:%'")
+        self.db.add_txn(9.99, "Doc schema probe", "purchase", "2026-11-01", source="t")
+        boom = RuntimeError('400 from x/vectors/upsert: {"message":"This index has a document schema, so writes must go through the documents API"}')
+        real = self.integ._pc
+        def fake(method, path, body=None):
+            if path.endswith("/vectors/upsert"):
+                raise boom
+            return real(method, path, body)
+        with mock.patch.object(self.integ, "_pc", side_effect=fake):
+            self.assertEqual(self.integ.pinecone_index_new(), 0)
+        self.assertTrue(self.db.kv_get("pinecone:unsupported"))
+        self.assertIn("error", self.integ.search_history("coffee"))   # falls back cleanly, no exception
+        self.assertEqual(self.integ.pinecone_index_new(), 0)          # and stops retrying
+        self.db.run("DELETE FROM kv WHERE key='pinecone:unsupported'")
+
+
 if __name__ == "__main__":
     unittest.main()
