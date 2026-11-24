@@ -70,6 +70,8 @@ Rules:
 - For questions about past spending ("how much on coffee since September?") use search_history when available.
 - Whenever the user states their credit score or a goal score, ALWAYS call set_profile first
   (key=credit_score value=<number>; key=goal value=<number and any date>) before answering.
+- Never estimate score points ("could add ~60 points") yourself: only quote est_points / est_score returned by
+  the simulate tool, and say it's a rough estimate.
 - NEVER invent numbers. For plans, utilization, dues or subscriptions call get_plan/get_summary and quote them.
 - Plans: lead with the 1-3 highest-impact actions, each with an amount and a date. Explain the "why" in one line.
 - Warn against closing old cards, opening many new cards, or paying only after the statement date when utilization is high.
